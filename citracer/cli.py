@@ -291,11 +291,17 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     logger.info("Graph: %d nodes, %d edges", len(graph.nodes), len(graph.edges))
+    # Reverse mode produces a "star" topology (many citers pointing to one
+    # root) which reads much better with a force-directed layout than with
+    # Sugiyama by year, so we seed the dropdown differently. The user can
+    # still switch at runtime.
+    default_layout = "force-directed" if args.reverse else "sugiyama-year"
     out_path = visualizer.render(
         graph,
         output=args.output,
         keyword=keywords,
         show_details=args.details,
+        default_layout=default_layout,
     )
     logger.info("Wrote %s", out_path)
 

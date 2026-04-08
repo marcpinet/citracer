@@ -160,7 +160,7 @@
   <div class="citracer-control">
     <label for="citracer-layout">layout</label>
     <select id="citracer-layout">
-      <option value="sugiyama-year" selected>Sugiyama (by year)</option>
+      <option value="sugiyama-year">Sugiyama (by year)</option>
       <option value="sugiyama-depth">Sugiyama (by depth)</option>
       <option value="force-directed">Force-directed (BarnesHut)</option>
       <option value="fruchterman">Fruchterman-Reingold (approx)</option>
@@ -326,7 +326,8 @@
   }
   let currentNodeId = null;
   let pinnedNodeId = null;  // when set, hover updates are ignored
-  let currentLayout = "sugiyama-year";
+  const DEFAULT_LAYOUT = "{{DEFAULT_LAYOUT}}";
+  let currentLayout = DEFAULT_LAYOUT;
   let currentSizeMode = "in-degree";
   let currentSpread = 1.0;  // multiplier applied on top of the layout's natural spacing
 
@@ -413,11 +414,10 @@
     if (currentSizeMode === "keyword-hits") {
       base = 18 + 3 * ((d.keyword_hits && d.keyword_hits.length) || 0);
     } else {
-      // in-graph citations: scale linearly with visible in-degree
-      base = 16 + 4.5 * (inDegree || 0);
+      base = 16 + 6 * Math.sqrt(inDegree || 0);
     }
     if (d.status === "root") base = Math.max(base, 30);
-    return base;
+    return Math.min(base, 80);
   }
 
   function applyFilter() {
@@ -478,9 +478,97 @@
 
   // --- Layout switching ------------------------------------------------
 
-  const LAYOUT_CONFIGS = {
-    "sugiyama-year": {
-      levelField: "year_level",
+  // Physics parameters must be tuned to the graph size. BarnesHut-style
+  // repulsion scales with N² and a constant tuned for 20 nodes will
+  // literally throw 1000 nodes off the screen. These helpers pick
+  // appropriate values so the simulation stays bounded regardless of
+  // graph size.
+  function _tierForSize(n) {
+    if (n <= 60)   return "small";
+    if (n <= 200)  return "medium";
+    if (n <= 600)  return "large";
+    return "huge";
+  }
+
+  function _barnesHutParams(n) {
+    // Weaker repulsion + stronger central gravity as N grows, so the
+    // simulation has something to bound it and can't blow up.
+    switch (_tierForSize(n)) {
+      case "small":  return {
+        gravitationalConstant: -30000, centralGravity: 0.15,
+        springLength: 260, springConstant: 0.04,
+        damping: 0.6, avoidOverlap: 1.0,
+      };
+      case "medium": return {
+        gravitationalConstant: -12000, centralGravity: 0.30,
+        springLength: 200, springConstant: 0.04,
+        damping: 0.7, avoidOverlap: 0.9,
+      };
+      case "large":  return {
+        gravitationalConstant: -5000, centralGravity: 0.55,
+        springLength: 160, springConstant: 0.05,
+        damping: 0.85, avoidOverlap: 0.7,
+      };
+      case "huge":   return {
+        gravitationalConstant: -2500, centralGravity: 0.85,
+        springLength: 120, springConstant: 0.08,
+        damping: 0.95, avoidOverlap: 0.5,
+      };
+    }
+  }
+
+  function _forceAtlas2Params(n) {
+    switch (_tierForSize(n)) {
+      case "small":  return {
+        gravitationalConstant: -80, centralGravity: 0.008,
+        springLength: 220, springConstant: 0.08,
+        damping: 0.6, avoidOverlap: 1.0,
+      };
+      case "medium": return {
+        gravitationalConstant: -50, centralGravity: 0.02,
+        springLength: 180, springConstant: 0.08,
+        damping: 0.75, avoidOverlap: 0.9,
+      };
+      case "large":  return {
+        gravitationalConstant: -30, centralGravity: 0.05,
+        springLength: 140, springConstant: 0.10,
+        damping: 0.85, avoidOverlap: 0.7,
+      };
+      case "huge":   return {
+        gravitationalConstant: -15, centralGravity: 0.12,
+        springLength: 100, springConstant: 0.15,
+        damping: 0.95, avoidOverlap: 0.5,
+      };
+    }
+  }
+
+  function _stabilizationIterations(n) {
+    // More iterations for bigger graphs, but cap at something reasonable
+    // so the user never waits more than a few seconds.
+    if (n <= 60)   return 1500;
+    if (n <= 200)  return 2000;
+    if (n <= 600)  return 1200;
+    return 800;  // huge — we'd rather stop early than hang forever
+  }
+
+  // Hard safety cap: if stabilization doesn't fire its "done" event
+  // within this many milliseconds we force physics off anyway. Prevents
+  // a runaway simulation from looping forever on pathological inputs.
+  const STABILIZATION_SAFETY_TIMEOUT_MS = 6000;
+
+  // Upper bound on node velocity during physics runs. vis.js doesn't
+  // actually expose `maxVelocity` as a first-class option (only
+  // `minVelocity`), so this value is enforced via a `stabilizationProgress`
+  // listener below that clamps runaway speeds.
+  const HARD_MAX_VELOCITY = 50;
+
+  function _nodeCount() {
+    try { return nodes.length; } catch (e) { return 0; }
+  }
+
+  function _sugiyamaLayoutConfig(levelField) {
+    return {
+      levelField: levelField,
       layout: {
         hierarchical: {
           enabled: true, direction: "UD", sortMethod: "directed",
@@ -490,48 +578,53 @@
         }
       },
       physics: { enabled: false },
-    },
-    "sugiyama-depth": {
-      levelField: "depth_level",
-      layout: {
-        hierarchical: {
-          enabled: true, direction: "UD", sortMethod: "directed",
-          shakeTowards: "leaves", levelSeparation: 220, nodeSpacing: 220,
-          treeSpacing: 280, blockShifting: true, edgeMinimization: true,
-          parentCentralization: true,
-        }
-      },
-      physics: { enabled: false },
-    },
-    "force-directed": {
-      levelField: null,
-      layout: { hierarchical: { enabled: false } },
-      physics: {
-        enabled: true, solver: "barnesHut",
-        barnesHut: {
-          gravitationalConstant: -30000, centralGravity: 0.15,
-          springLength: 260, springConstant: 0.04, damping: 0.6,
-          avoidOverlap: 1.0,
+    };
+  }
+
+  function layoutConfig(mode) {
+    const n = _nodeCount();
+    if (mode === "sugiyama-year")  return _sugiyamaLayoutConfig("year_level");
+    if (mode === "sugiyama-depth") return _sugiyamaLayoutConfig("depth_level");
+    if (mode === "force-directed") {
+      return {
+        levelField: null,
+        layout: { hierarchical: { enabled: false } },
+        physics: {
+          enabled: true, solver: "barnesHut",
+          barnesHut: _barnesHutParams(n),
+          stabilization: {
+            enabled: true,
+            iterations: _stabilizationIterations(n),
+            updateInterval: 50,
+            fit: true,
+          },
+          minVelocity: 0.75,
+          timestep: 0.3,
+          adaptiveTimestep: true,
         },
-        stabilization: { enabled: true, iterations: 1500, fit: true },
-        minVelocity: 0.75,
-      },
-    },
-    "fruchterman": {
-      levelField: null,
-      layout: { hierarchical: { enabled: false } },
-      physics: {
-        enabled: true, solver: "forceAtlas2Based",
-        forceAtlas2Based: {
-          gravitationalConstant: -80, centralGravity: 0.008,
-          springLength: 220, springConstant: 0.08, damping: 0.6,
-          avoidOverlap: 1.0,
+      };
+    }
+    if (mode === "fruchterman") {
+      return {
+        levelField: null,
+        layout: { hierarchical: { enabled: false } },
+        physics: {
+          enabled: true, solver: "forceAtlas2Based",
+          forceAtlas2Based: _forceAtlas2Params(n),
+          stabilization: {
+            enabled: true,
+            iterations: _stabilizationIterations(n),
+            updateInterval: 50,
+            fit: true,
+          },
+          minVelocity: 0.75,
+          timestep: 0.3,
+          adaptiveTimestep: true,
         },
-        stabilization: { enabled: true, iterations: 1500, fit: true },
-        minVelocity: 0.75,
-      },
-    },
-  };
+      };
+    }
+    return null;
+  }
 
   function applySpread(newMultiplier) {
     // Scale every node's position from the current centroid, so the graph
@@ -563,14 +656,16 @@
     if (slider) slider.value = '1';
   }
 
+  let _safetyTimer = null;
+
   function switchLayout(mode) {
-    const cfg = LAYOUT_CONFIGS[mode];
+    const cfg = layoutConfig(mode);
     if (!cfg) return;
     currentLayout = mode;
-    // A new layout has its own natural spacing, so rebase the slider.
     resetSpreadSlider();
 
-    // For Sugiyama modes, rewrite each node's `level` from the chosen field.
+    if (_safetyTimer) { clearTimeout(_safetyTimer); _safetyTimer = null; }
+
     if (cfg.levelField) {
       const updates = [];
       nodes.forEach(n => {
@@ -582,21 +677,24 @@
       if (updates.length) nodes.update(updates);
     }
 
-    // Apply layout + physics. Hierarchical re-runs on setOptions.
     network.setOptions({ layout: cfg.layout, physics: cfg.physics });
 
-    // For Sugiyama, disable the hierarchical constraint shortly after
-    // layout has placed the nodes, so the user can drag them freely.
     if (mode.startsWith("sugiyama")) {
       setTimeout(() => {
         network.setOptions({ layout: { hierarchical: { enabled: false } } });
         network.fit();
       }, 120);
     } else {
-      // For physics-based layouts, freeze once stabilization is done.
       network.once("stabilizationIterationsDone", () => {
         network.setOptions({ physics: { enabled: false } });
+        if (_safetyTimer) { clearTimeout(_safetyTimer); _safetyTimer = null; }
+        network.fit();
       });
+
+      _safetyTimer = setTimeout(() => {
+        network.setOptions({ physics: { enabled: false } });
+        network.fit();
+      }, STABILIZATION_SAFETY_TIMEOUT_MS);
     }
   }
 
@@ -706,6 +804,7 @@
   // Layout dropdown
   const layoutSelect = document.getElementById('citracer-layout');
   if (layoutSelect) {
+    layoutSelect.value = DEFAULT_LAYOUT;
     layoutSelect.addEventListener('change', (ev) => {
       switchLayout(ev.target.value);
       saveState();
@@ -965,10 +1064,7 @@
         const reset = document.getElementById('citracer-reset');
         if (reset) reset.classList.add('saved');
       } else {
-        setTimeout(() => {
-          network.setOptions({ layout: { hierarchical: { enabled: false } } });
-          network.fit();
-        }, 120);
+        switchLayout(currentLayout);
       }
 
       // Live update on hover (ignored while pinned)

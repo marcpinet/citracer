@@ -43,6 +43,7 @@ def render(
     output: str | Path,
     keyword: str | list[str] = "",
     show_details: bool = False,
+    default_layout: str = "sugiyama-year",
 ) -> Path:
     # Normalize: always work with a list of keywords internally.
     keywords: list[str] = [keyword] if isinstance(keyword, str) else list(keyword)
@@ -122,10 +123,11 @@ def render(
                 smooth={"type": "cubicBezier", "forceDirection": "vertical", "roundness": 0.4},
             )
 
-    # Initial options: Sugiyama by year, physics OFF. vis.js will place
-    # nodes deterministically via the hierarchical algorithm; the JS
-    # overlay then disables the hierarchy constraint so the user can drag
-    # nodes freely without vis.js snapping them back to their layer.
+    # Neutral initial options. The real layout is applied by the JS
+    # overlay via `switchLayout(DEFAULT_LAYOUT)` in tryAttach(), using the
+    # exact same code path as runtime layout changes. Keeping physics and
+    # hierarchical layout off at creation avoids a flash of "wrong layout"
+    # before the JS kicks in.
     options = {
         "nodes": {
             "font": {
@@ -139,18 +141,7 @@ def render(
             "margin": 10,
         },
         "layout": {
-            "hierarchical": {
-                "enabled": True,
-                "direction": "UD",
-                "sortMethod": "directed",
-                "shakeTowards": "leaves",
-                "levelSeparation": 220,
-                "nodeSpacing": 220,
-                "treeSpacing": 280,
-                "blockShifting": True,
-                "edgeMinimization": True,
-                "parentCentralization": True,
-            },
+            "hierarchical": {"enabled": False},
         },
         "physics": {
             "enabled": False,
@@ -166,7 +157,7 @@ def render(
     net.set_options(json.dumps(options))
 
     net.write_html(str(output), notebook=False, open_browser=False)
-    _inject_overlay(output, keywords, graph, node_details, has_secondary_edges)
+    _inject_overlay(output, keywords, graph, node_details, has_secondary_edges, default_layout)
     return output
 
 
@@ -249,6 +240,7 @@ def _inject_overlay(
     graph: TracerGraph,
     node_details: dict[str, dict],
     has_secondary_edges: bool = False,
+    default_layout: str = "sugiyama-year",
 ) -> None:
     """Inject the control panel, legend, and side info panel into the pyvis
     HTML output. The template lives in templates/overlay.html.tmpl and uses
@@ -301,6 +293,10 @@ def _inject_overlay(
         )
     keyword_chips = " ".join(chip_parts) or '<span style="color:#888">(none)</span>'
 
+    # Allow-list of known layout values, fall back to Sugiyama-year.
+    _valid_layouts = {"sugiyama-year", "sugiyama-depth", "force-directed", "fruchterman"}
+    effective_layout = default_layout if default_layout in _valid_layouts else "sugiyama-year"
+
     substitutions = {
         "{{KEYWORD_CHIPS}}":          keyword_chips,
         "{{N_NODES}}":                str(n_nodes),
@@ -310,6 +306,7 @@ def _inject_overlay(
         "{{NODE_DETAILS_JSON}}":      json.dumps(node_details),
         "{{KEYWORD_SPECS_JSON}}":     json.dumps(kw_specs),
         "{{DEFAULT_DISABLED_JSON}}":  json.dumps(default_disabled),
+        "{{DEFAULT_LAYOUT}}":         effective_layout,
     }
 
     overlay = _load_overlay_template()
