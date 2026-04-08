@@ -47,7 +47,15 @@ The key can be provided in three ways, in order of precedence:
 
 1. `--s2-api-key <key>` as a CLI flag
 2. `S2_API_KEY` environment variable in your shell
-3. A `.env` file at the project root (copy `.env.example` and fill it in):
+3. A persistent **user config** at `~/.citracer/config.json`, set once via:
+
+   ```bash
+   citracer config set-s2-key <your-key>
+   ```
+
+   Other config commands: `citracer config show`, `citracer config get-s2-key` (masked), `citracer config clear-s2-key`, `citracer config path`. The file is created with mode `600` on POSIX so other local users can't read it.
+
+4. A `.env` file at the project root (copy `.env.example` and fill it in):
 
    ```
    S2_API_KEY=your_key_here
@@ -55,7 +63,7 @@ The key can be provided in three ways, in order of precedence:
 
    The `.env` file is git-ignored.
 
-If none of these are set, the unauthenticated public endpoint is used as fallback.
+If none of these are set, the unauthenticated public endpoint is used as fallback (much slower, frequent 429 backoffs).
 
 ## 🚀 Usage
 

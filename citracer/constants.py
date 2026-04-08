@@ -50,6 +50,21 @@ S2_MIN_INTERVAL_WITHOUT_KEY: float = 3.5
 #: Length of the list == number of retry attempts.
 S2_429_BACKOFF_DELAYS: tuple[float, ...] = (0.0, 5.0, 15.0, 40.0)
 
+#: Number of consecutive 429s after which the resolver gives up on S2 and
+#: short-circuits subsequent calls for the cooldown period below. Without
+#: an API key, S2 hammering wastes ~60s per failed lookup; this caps the
+#: damage at ``threshold * worst_case_per_call``.
+S2_429_CIRCUIT_BREAKER_THRESHOLD: int = 3
+
+#: After tripping the S2 circuit breaker, skip S2 calls for this many
+#: seconds. After the cooldown the breaker resets and we try again.
+S2_CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = 120.0
+
+#: After an arxiv 429 / 503, skip arxiv search calls for this many seconds.
+#: arxiv recovers slowly from rate-limits and aggressive retry just makes
+#: it worse for everyone.
+ARXIV_COOLDOWN_AFTER_FAILURE_SECONDS: float = 60.0
+
 #: Minimum delay (seconds) between arxiv.org API requests. arxiv asks users
 #: to stay under ~3 seconds between requests; the `arxiv` package enforces
 #: this internally but we also use it for downloads.
@@ -68,8 +83,10 @@ ARXIV_PAGE_SIZE: int = 5
 #: Number of retries on arxiv client failures.
 ARXIV_NUM_RETRIES: int = 3
 
-#: PDF download timeout (seconds) for arxiv and OpenReview.
-PDF_DOWNLOAD_TIMEOUT_SECONDS: float = 120.0
+#: PDF download timeout (seconds) for arxiv and OpenReview. Kept short
+#: enough that a Ctrl+C interrupts within ~1 minute even if a worker is
+#: stuck on a slow download.
+PDF_DOWNLOAD_TIMEOUT_SECONDS: float = 60.0
 
 #: Max number of distinctive title words used when the phrase search on
 #: arXiv fails and we fall back to a non-phrase keyword query.

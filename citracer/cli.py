@@ -10,7 +10,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-from . import pdf_parser, tracer, visualizer
+from . import pdf_parser, tracer, user_config, visualizer
 from .constants import GROBID_DEFAULT_WORKERS
 from .exporter import export_graph
 from .reference_resolver import ReferenceResolver
@@ -120,6 +120,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else list(argv)
+
+    # The `config` subcommand bypasses the main argparse so it doesn't
+    # require --keyword and friends. We dispatch on the first positional
+    # arg manually before falling through to the normal trace flow.
+    if raw_argv and raw_argv[0] == "config":
+        setup_logging(logging.INFO)
+        return _handle_config(raw_argv[1:])
+
     args = build_parser().parse_args(argv)
     setup_logging(logging.DEBUG if args.verbose else logging.INFO)
 
@@ -156,11 +165,33 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("Aborted by user (no GROBID).")
             return 3
 
-    # Resolve the S2 API key: explicit CLI flag > env var (.env or shell) > None
-    s2_key = args.s2_api_key or os.environ.get("S2_API_KEY") or None
+    # Resolve the S2 API key with the following priority:
+    #   1. --s2-api-key CLI flag (explicit, wins)
+    #   2. S2_API_KEY environment variable (shell or project .env)
+    #   3. ~/.citracer/config.json (set via `citracer config set-s2-key ...`)
+    #   4. None (unauthenticated public endpoint, very slow)
+    s2_key = (
+        args.s2_api_key
+        or os.environ.get("S2_API_KEY")
+        or user_config.get_s2_api_key()
+        or None
+    )
     if s2_key:
-        logger.debug("Using Semantic Scholar API key (source: %s)",
-                     "CLI" if args.s2_api_key else "environment")
+        if args.s2_api_key:
+            src = "CLI"
+        elif os.environ.get("S2_API_KEY"):
+            src = "environment"
+        else:
+            src = "user config"
+        logger.debug("Using Semantic Scholar API key (source: %s)", src)
+    else:
+        logger.warning(
+            "No Semantic Scholar API key set. Without one, lookups are "
+            "throttled to ~3.5s/call and may waste ~60s on 429 backoff per "
+            "failed search. Get a free key for ~10x faster deep traces: "
+            "https://www.semanticscholar.org/product/api#api-key\n"
+            "Once you have a key, run: citracer config set-s2-key <key>"
+        )
 
     # Resolve the root source into a local PDF path (download if needed).
     resolver = ReferenceResolver(cache_dir=args.cache_dir, s2_api_key=s2_key)
@@ -278,6 +309,89 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_open:
         webbrowser.open(out_path.resolve().as_uri())
     return 0
+
+
+def _handle_config(argv: list[str]) -> int:
+    """Handle ``citracer config <subcommand> [args...]`` invocations."""
+    parser = argparse.ArgumentParser(
+        prog="citracer config",
+        description="Manage citracer's persistent user config "
+                    "(stored in ~/.citracer/config.json).",
+    )
+    sub = parser.add_subparsers(dest="action", required=False)
+
+    sub.add_parser(
+        "show",
+        help="Show the current config (secrets are masked).",
+    )
+
+    p_set = sub.add_parser(
+        "set-s2-key",
+        help="Save a Semantic Scholar API key for future runs.",
+    )
+    p_set.add_argument("key", help="Your Semantic Scholar API key.")
+
+    sub.add_parser(
+        "get-s2-key",
+        help="Print the saved Semantic Scholar API key (masked).",
+    )
+    sub.add_parser(
+        "clear-s2-key",
+        help="Remove the saved Semantic Scholar API key.",
+    )
+    sub.add_parser(
+        "path",
+        help="Print the absolute path to the config file.",
+    )
+
+    args = parser.parse_args(argv)
+
+    if args.action is None:
+        parser.print_help()
+        return 0
+
+    if args.action == "show":
+        cfg = user_config.load_config()
+        if not cfg:
+            logger.info("Config is empty (file: %s)", user_config.config_file())
+            return 0
+        for k, v in cfg.items():
+            display = user_config.mask_secret(v) if "key" in k or "token" in k else v
+            logger.info("%s = %s", k, display)
+        return 0
+
+    if args.action == "set-s2-key":
+        path = user_config.set_s2_api_key(args.key.strip())
+        logger.info(
+            "Saved Semantic Scholar API key to %s (masked: %s)",
+            path, user_config.mask_secret(args.key.strip()),
+        )
+        return 0
+
+    if args.action == "get-s2-key":
+        key = user_config.get_s2_api_key()
+        if key is None:
+            logger.info("No Semantic Scholar API key saved.")
+            return 1
+        logger.info("Semantic Scholar API key: %s", user_config.mask_secret(key))
+        return 0
+
+    if args.action == "clear-s2-key":
+        removed = user_config.clear_s2_api_key()
+        if removed:
+            logger.info("Cleared Semantic Scholar API key from user config.")
+        else:
+            logger.info("No Semantic Scholar API key was set.")
+        return 0
+
+    if args.action == "path":
+        # logger.info would prefix with timestamps; this one is meant to
+        # be machine-parseable so we print directly.
+        sys.stdout.write(str(user_config.config_file()) + "\n")
+        return 0
+
+    parser.print_help()
+    return 2
 
 
 def _check_grobid(grobid_url: str, timeout: float = 3.0) -> bool:

@@ -24,6 +24,7 @@ from rapidfuzz import fuzz
 from .api_types import NormalizedMeta, OpenReviewCandidate, S2Paper, S2SearchResponse
 from .metadata_cache import MetadataCache
 from .constants import (
+    ARXIV_COOLDOWN_AFTER_FAILURE_SECONDS,
     ARXIV_FUZZY_MATCH_THRESHOLD,
     ARXIV_KEYWORD_SEARCH_MAX_WORDS,
     ARXIV_KEYWORD_SEARCH_MIN_WORD_LEN,
@@ -33,6 +34,8 @@ from .constants import (
     OPENREVIEW_FUZZY_MATCH_THRESHOLD,
     PDF_DOWNLOAD_TIMEOUT_SECONDS,
     S2_429_BACKOFF_DELAYS,
+    S2_429_CIRCUIT_BREAKER_THRESHOLD,
+    S2_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
     S2_MIN_INTERVAL_WITH_KEY,
     S2_MIN_INTERVAL_WITHOUT_KEY,
 )
@@ -122,11 +125,68 @@ class ReferenceResolver:
         # across threads when callers parallelize resolve() invocations.
         self._s2_lock = threading.Lock()
         self._arxiv_dl_lock = threading.Lock()
+        # Circuit breakers: when an upstream service rate-limits us
+        # repeatedly, stop hammering it for a cooldown period instead of
+        # paying the full backoff cost on every subsequent call.
+        self._s2_consecutive_429s = 0
+        self._s2_breaker_tripped_at: float | None = None
+        self._arxiv_breaker_tripped_at: float | None = None
+        self._breaker_lock = threading.Lock()
         self._arxiv_client = arxiv.Client(
             page_size=ARXIV_PAGE_SIZE,
             delay_seconds=ARXIV_MIN_INTERVAL,
             num_retries=ARXIV_NUM_RETRIES,
         )
+
+    # ---------- circuit breakers ----------
+
+    def _s2_circuit_open(self) -> bool:
+        """True iff S2 calls should be skipped right now."""
+        with self._breaker_lock:
+            if self._s2_breaker_tripped_at is None:
+                return False
+            if time.time() - self._s2_breaker_tripped_at > S2_CIRCUIT_BREAKER_COOLDOWN_SECONDS:
+                # Cooldown elapsed, give it another chance
+                self._s2_breaker_tripped_at = None
+                self._s2_consecutive_429s = 0
+                return False
+            return True
+
+    def _s2_record_429(self) -> None:
+        with self._breaker_lock:
+            self._s2_consecutive_429s += 1
+            if (self._s2_consecutive_429s >= S2_429_CIRCUIT_BREAKER_THRESHOLD
+                    and self._s2_breaker_tripped_at is None):
+                self._s2_breaker_tripped_at = time.time()
+                logger.warning(
+                    "S2 rate-limited %d times in a row; skipping S2 for %.0fs. "
+                    "Get a free API key for much faster resolves: "
+                    "https://www.semanticscholar.org/product/api#api-key",
+                    self._s2_consecutive_429s,
+                    S2_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
+                )
+
+    def _s2_record_success(self) -> None:
+        with self._breaker_lock:
+            self._s2_consecutive_429s = 0
+
+    def _arxiv_circuit_open(self) -> bool:
+        with self._breaker_lock:
+            if self._arxiv_breaker_tripped_at is None:
+                return False
+            if time.time() - self._arxiv_breaker_tripped_at > ARXIV_COOLDOWN_AFTER_FAILURE_SECONDS:
+                self._arxiv_breaker_tripped_at = None
+                return False
+            return True
+
+    def _arxiv_record_failure(self) -> None:
+        with self._breaker_lock:
+            if self._arxiv_breaker_tripped_at is None:
+                self._arxiv_breaker_tripped_at = time.time()
+                logger.warning(
+                    "arxiv API rate-limited; skipping arxiv search for %.0fs",
+                    ARXIV_COOLDOWN_AFTER_FAILURE_SECONDS,
+                )
 
     # ---------- public ----------
 
@@ -245,7 +305,16 @@ class ReferenceResolver:
             self._last_s2_call = time.time()
 
     def _s2_get(self, url: str, label: str) -> dict | None:
-        """GET with throttling + 429-aware exponential backoff."""
+        """GET with throttling + 429-aware exponential backoff.
+
+        If S2 has been rate-limiting us repeatedly, the circuit breaker
+        short-circuits the call and returns None immediately. This caps the
+        worst-case latency for users without an S2 API key.
+        """
+        if self._s2_circuit_open():
+            logger.debug("S2 %s skipped (circuit breaker open)", label)
+            return None
+
         backoff = S2_429_BACKOFF_DELAYS
         for attempt, wait in enumerate(backoff):
             if wait:
@@ -257,6 +326,7 @@ class ReferenceResolver:
                 logger.warning("S2 %s failed: %s", label, e)
                 return None
             if r.status_code == 200:
+                self._s2_record_success()
                 return r.json()
             if r.status_code == 429:
                 logger.debug("S2 %s -> 429 (attempt %d/%d)", label, attempt + 1, len(backoff))
@@ -264,6 +334,7 @@ class ReferenceResolver:
             logger.debug("S2 %s -> HTTP %s", label, r.status_code)
             return None
         logger.warning("S2 %s exhausted retries (rate-limited)", label)
+        self._s2_record_429()
         return None
 
     def _s2_by_id(self, id_str: str) -> NormalizedMeta | None:
@@ -334,6 +405,8 @@ class ReferenceResolver:
         return out
 
     def _arxiv_search_phrase(self, title: str) -> list:
+        if self._arxiv_circuit_open():
+            return []
         # Strip punctuation that breaks Lucene phrase queries (notably ':')
         cleaned = re.sub(r"[^\w\s\-]", " ", title)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()[:200]
@@ -345,9 +418,12 @@ class ReferenceResolver:
             return list(self._arxiv_client.results(search))
         except Exception as e:
             logger.warning("arxiv phrase search failed for %r: %s", cleaned[:60], e)
+            self._arxiv_record_failure()
             return []
 
     def _arxiv_search_keywords(self, title: str) -> list:
+        if self._arxiv_circuit_open():
+            return []
         # Use distinctive words to build an AND query.
         words = re.findall(
             rf"\b[\w\-]{{{ARXIV_KEYWORD_SEARCH_MIN_WORD_LEN},}}\b",
@@ -365,6 +441,7 @@ class ReferenceResolver:
             return list(self._arxiv_client.results(search))
         except Exception as e:
             logger.warning("arxiv keyword search failed for %r: %s", title[:60], e)
+            self._arxiv_record_failure()
             return []
 
     def _normalize_s2(self, paper: S2Paper) -> NormalizedMeta:

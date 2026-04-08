@@ -9,6 +9,7 @@ the graph, resolves references and enqueues children for the next batch.
 """
 from __future__ import annotations
 import logging
+import signal
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -17,18 +18,51 @@ from tqdm import tqdm
 
 from . import keyword_matcher, pdf_parser
 from .constants import GROBID_DEFAULT_WORKERS
-
-#: Max threads used to resolve references in parallel. Each resolve hits
-#: arxiv + possibly S2, but the rate limits are respected by locks inside
-#: ReferenceResolver, so more threads don't break the rate limits — they
-#: just overlap waiting periods.
-RESOLVE_DEFAULT_WORKERS = 4
 from .cross_citation import add_secondary_edges
 from .models import CitationEdge, PaperNode, ParsedPaper, TracerGraph
 from .reference_resolver import ReferenceResolver, ResolvedRef
 from .utils import make_paper_id, normalize_arxiv_id, normalize_doi
 
 logger = logging.getLogger(__name__)
+
+#: Max threads used to resolve references in parallel. Each resolve hits
+#: arxiv + possibly S2, but the rate limits are respected by locks inside
+#: ReferenceResolver, so more threads don't break the rate limits — they
+#: just overlap waiting periods.
+RESOLVE_DEFAULT_WORKERS = 4
+
+# Global cancellation flag set by SIGINT. The BFS loops poll it between
+# iterations so Ctrl+C exits within seconds instead of waiting for every
+# in-flight HTTP request to complete.
+_CANCEL_REQUESTED = False
+
+
+def _install_sigint_handler():
+    """Register a SIGINT handler that flips the cancel flag.
+
+    Returns the previous handler so the caller can restore it once tracing
+    is done. We do NOT want to leave a global signal handler in place after
+    trace() returns to a host application.
+    """
+    global _CANCEL_REQUESTED
+    _CANCEL_REQUESTED = False
+
+    def _handler(_signum, _frame):
+        global _CANCEL_REQUESTED
+        if _CANCEL_REQUESTED:
+            # Second Ctrl+C: forceful exit, propagate the interrupt
+            raise KeyboardInterrupt
+        _CANCEL_REQUESTED = True
+        logger.warning(
+            "Cancellation requested, finishing in-flight work and stopping..."
+        )
+
+    try:
+        return signal.signal(signal.SIGINT, _handler)
+    except (ValueError, OSError):
+        # signal.signal can fail if we're not in the main thread (tests etc.)
+        return None
+
 
 # Re-exported for backwards compatibility with `from .tracer import add_secondary_edges`.
 __all__ = ["trace", "trace_reverse", "add_secondary_edges"]
@@ -254,8 +288,12 @@ def trace(
         max_workers=RESOLVE_DEFAULT_WORKERS,
         thread_name_prefix="citracer-resolve",
     )
+    prev_handler = _install_sigint_handler()
     try:
         while queue:
+            if _CANCEL_REQUESTED:
+                break
+
             batch: list[QueueItem] = list(queue)
             queue.clear()
 
@@ -271,7 +309,7 @@ def trace(
                 to_parse.append(p)
 
             parsed_by_path: dict[Path, ParsedPaper | None] = {}
-            if to_parse:
+            if to_parse and not _CANCEL_REQUESTED:
                 futures = {
                     executor.submit(
                         pdf_parser.parse,
@@ -282,6 +320,13 @@ def trace(
                     for p in to_parse
                 }
                 for fut in as_completed(futures):
+                    if _CANCEL_REQUESTED:
+                        # Cancel anything that hasn't started yet; running
+                        # futures finish on their own (we can't kill HTTP
+                        # mid-request) but at least we don't pile on more.
+                        for f in futures:
+                            f.cancel()
+                        break
                     p = futures[fut]
                     try:
                         parsed_by_path[p] = fut.result()
@@ -289,14 +334,32 @@ def trace(
                         logger.error("Parse failed for %s: %s", p, e)
                         parsed_by_path[p] = None
 
+            if _CANCEL_REQUESTED:
+                break
+
             # Process every batch item sequentially, in BFS order, using the
             # parsed results (or None on parse failure / already-known paths).
             for item in batch:
+                if _CANCEL_REQUESTED:
+                    break
                 _handle(item, parsed_by_path.get(item[0]))
     finally:
-        executor.shutdown()
-        resolve_executor.shutdown()
+        # cancel_futures=True drops queued-but-not-started work immediately.
+        # wait=False means we don't block waiting for in-flight workers.
+        executor.shutdown(wait=False, cancel_futures=True)
+        resolve_executor.shutdown(wait=False, cancel_futures=True)
         pbar.close()
+        if prev_handler is not None:
+            try:
+                signal.signal(signal.SIGINT, prev_handler)
+            except (ValueError, OSError):
+                pass
+
+    if _CANCEL_REQUESTED:
+        logger.warning(
+            "Trace interrupted: returning partial graph (%d nodes, %d edges)",
+            len(graph.nodes), len(graph.edges),
+        )
 
     # Always compute bibliographic-only cross-edges. This is cheap (no API
     # calls, just string + fuzzy comparisons over the in-memory graph) and
@@ -379,8 +442,11 @@ def trace_reverse(
     visited_node_ids: set[str] = {root_node.paper_id}
 
     pbar = tqdm(desc="reverse-tracing", unit="paper")
+    prev_handler = _install_sigint_handler()
     try:
         while queue:
+            if _CANCEL_REQUESTED:
+                break
             s2_id, current_node_id, depth = queue.popleft()
             if depth >= max_depth:
                 continue
@@ -390,6 +456,8 @@ def trace_reverse(
                 continue
 
             for c in citations:
+                if _CANCEL_REQUESTED:
+                    break
                 contexts = c.get("contexts") or []
                 if not contexts:
                     continue  # no snippet, can't filter — skip
@@ -449,11 +517,22 @@ def trace_reverse(
                     queue.append((s2_next, node_id, depth + 1))
     finally:
         pbar.close()
+        if prev_handler is not None:
+            try:
+                signal.signal(signal.SIGINT, prev_handler)
+            except (ValueError, OSError):
+                pass
 
-    logger.info(
-        "Reverse trace complete: %d nodes, %d edges",
-        len(graph.nodes), len(graph.edges),
-    )
+    if _CANCEL_REQUESTED:
+        logger.warning(
+            "Reverse trace interrupted: returning partial graph (%d nodes, %d edges)",
+            len(graph.nodes), len(graph.edges),
+        )
+    else:
+        logger.info(
+            "Reverse trace complete: %d nodes, %d edges",
+            len(graph.nodes), len(graph.edges),
+        )
     return graph
 
 
