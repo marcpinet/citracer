@@ -1,0 +1,56 @@
+name: tests
+
+# Runs on every push to main, every pull request, and on-demand via the
+# "Run workflow" button in the Actions tab. We use both because:
+#   - push → main catches anything merged directly or via squash-merge
+#   - pull_request catches regressions BEFORE they land on main
+#   - workflow_dispatch lets you re-run green or trigger manually without
+#     needing a commit (useful when external services change behaviour)
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run test suite
+        run: pytest tests/ -v --tb=short
+
+      - name: Verify package imports cleanly
+        # Sanity check: every module should at least be importable without
+        # side effects. Catches a class of regressions where a test happens
+        # to monkey-patch around a broken import.
+        run: |
+          python -c "
+          from citracer import (
+              cli, constants, api_types, cross_citation, exporter,
+              keyword_matcher, metadata_cache, models, pdf_parser,
+              reference_resolver, source_resolver, tracer, utils, visualizer,
+          )
+          print('All modules import cleanly.')
+          "

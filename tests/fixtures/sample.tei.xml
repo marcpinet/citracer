@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0" xml:space="preserve">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title type="main">A Survey of Channel-Independence for Time Series Forecasting</title>
+      </titleStmt>
+      <publicationStmt>
+        <publisher/>
+        <date when="2024">2024</date>
+      </publicationStmt>
+      <sourceDesc>
+        <biblStruct>
+          <analytic>
+            <author>
+              <persName>
+                <forename type="first">Marc</forename>
+                <surname>Pinet</surname>
+              </persName>
+            </author>
+          </analytic>
+          <monogr>
+            <idno type="DOI">10.48550/arxiv.9999.99999</idno>
+            <idno type="arXiv">9999.99999</idno>
+          </monogr>
+        </biblStruct>
+      </sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text xml:lang="en">
+    <body>
+      <div>
+        <head>Introduction</head>
+        <p>Early work on channel-independent forecasting<ref type="bibr" target="#b0">Smith et al. (2020)</ref> established the baseline approach.</p>
+        <p>Later, <ref type="bibr" target="#b1">Jones and Lee (2021)</ref> proposed an extension that also leveraged channel-independence for multivariate data.</p>
+      </div>
+      <figure xml:id="fig_1">
+        <head>Figure 1</head>
+        <figDesc>Architecture diagram.</figDesc>
+        <p>𝑥 ∈ ℝ 𝑛×𝑑 𝑀 ⊗ 𝑥 encoder ℝ output 𝑦 ∈ ℝ</p>
+      </figure>
+      <div>
+        <head>Method</head>
+        <p>Task Definition Since<ref type="bibr" target="#b2">Zeng et al. (2023)</ref> </p>
+        <p>and<ref type="bibr" target="#b3">Nie et al. (2022)</ref> </p>
+        <p>have verified that channel-independence works well for time series, we adopt the same convention.</p>
+      </div>
+      <div>
+        <head>Related</head>
+        <p>Earlier, Brown et al. (2019) demonstrated a related channel-independent architecture on audio signals.</p>
+      </div>
+    </body>
+    <back>
+      <div type="references">
+        <listBibl>
+          <biblStruct xml:id="b0">
+            <analytic>
+              <title type="main">Channel-independent baselines for time series</title>
+              <author><persName><forename type="first">John</forename><surname>Smith</surname></persName></author>
+              <author><persName><forename type="first">Alice</forename><surname>Kim</surname></persName></author>
+            </analytic>
+            <monogr><imprint><date>2020</date></imprint></monogr>
+            <note type="raw_reference">Smith, John et al. Channel-independent baselines. 2020.</note>
+          </biblStruct>
+          <biblStruct xml:id="b1">
+            <analytic>
+              <title type="main">Extensions to channel independence for multivariate forecasting</title>
+              <author><persName><forename type="first">Pat</forename><surname>Jones</surname></persName></author>
+              <author><persName><forename type="first">Sam</forename><surname>Lee</surname></persName></author>
+            </analytic>
+            <monogr><imprint><date>2021</date></imprint></monogr>
+          </biblStruct>
+          <biblStruct xml:id="b2">
+            <analytic>
+              <title type="main">Are transformers effective for time series forecasting</title>
+              <author><persName><forename type="first">Ailing</forename><surname>Zeng</surname></persName></author>
+            </analytic>
+            <monogr><imprint><date>2023</date></imprint></monogr>
+          </biblStruct>
+          <biblStruct xml:id="b3">
+            <analytic>
+              <title type="main">A time series is worth 64 words: Long-term forecasting with transformers</title>
+              <author><persName><forename type="first">Yuqi</forename><surname>Nie</surname></persName></author>
+            </analytic>
+            <monogr>
+              <idno type="arXiv">2211.14730</idno>
+              <imprint><date>2022</date></imprint>
+            </monogr>
+          </biblStruct>
+          <biblStruct xml:id="b4">
+            <analytic>
+              <title type="main">Channel-independent acoustic modelling</title>
+              <author><persName><forename type="first">Aaron</forename><surname>Brown</surname></persName></author>
+            </analytic>
+            <monogr><imprint><date>2019</date></imprint></monogr>
+          </biblStruct>
+        </listBibl>
+      </div>
+    </back>
+  </text>
+</TEI>

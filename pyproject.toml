@@ -1,0 +1,97 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "citracer"
+version = "1.0.0"
+description = "Trace citation chains for any keyword across research papers."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Marc Pinet" },
+]
+keywords = [
+    "citation-graph",
+    "literature-review",
+    "grobid",
+    "arxiv",
+    "semantic-scholar",
+    "openreview",
+    "pdf-parsing",
+    "research-tools",
+    "bibliography",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Text Processing :: Markup :: XML",
+]
+dependencies = [
+    "requests>=2.31.0",
+    "lxml>=5.0.0",
+    "pymupdf>=1.24.0",
+    "arxiv>=2.1.0",
+    "pyvis>=0.3.2",
+    "rapidfuzz>=3.6.0",
+    "tqdm>=4.66.0",
+    "pysbd>=0.3.4",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/marcpinet/citracer"
+Repository = "https://github.com/marcpinet/citracer"
+Issues = "https://github.com/marcpinet/citracer/issues"
+
+# This is the line that creates the `citracer` command on PATH after install.
+# `citracer.cli:main` means: import the `main` function from `citracer.cli`,
+# wrap it in a tiny launcher script, and put that launcher on PATH.
+[project.scripts]
+citracer = "citracer.cli:main"
+
+# Tell setuptools how to find the package and what non-.py files to bundle.
+# Without `package-data`, the overlay HTML/CSS/JS template would be silently
+# excluded from wheels, breaking the visualizer at runtime for installed users.
+[tool.setuptools]
+packages = ["citracer"]
+
+[tool.setuptools.package-data]
+citracer = [
+    "templates/*.tmpl",
+    "templates/*.html",
+]
+
+# ---------------------------------------------------------------------------
+# Pytest config (kept from before)
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",                # short summary of skipped/failed at the end
+    "--strict-markers",   # unknown @pytest.mark.x raises an error
+    "--strict-config",
+]
+filterwarnings = [
+    # pyvis and the arxiv package pull in their own deprecation noise
+    # that isn't actionable from citracer's side.
+    "ignore::DeprecationWarning:pyvis",
+    "ignore::DeprecationWarning:arxiv",
+]

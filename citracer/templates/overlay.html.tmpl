@@ -1,0 +1,1029 @@
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<style>
+  .citracer-panel {
+    position: fixed; background: rgba(255,255,255,0.97); color: #222;
+    padding: 12px 16px; border-radius: 8px; font-family: sans-serif;
+    font-size: 13px; border: 1px solid #ccc;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08); z-index: 9999;
+  }
+  #citracer-legend { top: 10px; left: 10px; max-width: 320px; }
+  #citracer-info   { top: 10px; right: 10px; width: 380px;
+                     max-height: calc(100vh - 30px); overflow-y: auto;
+                     display: none; }
+  #citracer-info.pinned { border-color: #06c; box-shadow: 0 2px 12px rgba(0,102,204,0.25); }
+  #citracer-info.pinned::before {
+    content: "📌 pinned — click the node again or × to unpin";
+    display: block; font-size: 10px; color: #06c; margin-bottom: 6px;
+  }
+  #citracer-info-close {
+    position: absolute; top: 6px; right: 10px;
+    color: #888; font-size: 22px; line-height: 1; cursor: pointer;
+    user-select: none; font-weight: 300;
+  }
+  #citracer-info-close:hover { color: #222; }
+  #citracer-info.empty { display: none; }
+  .legend-item {
+    cursor: pointer; user-select: none; padding: 2px 4px; border-radius: 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .legend-item:hover { background: #f0f0f0; }
+  .legend-item.disabled { opacity: 0.35; text-decoration: line-through; }
+  .legend-dot {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  }
+  .legend-edge { display: flex; align-items: center; gap: 8px; padding: 2px 4px; border-radius: 4px; }
+  .legend-edge-toggle { cursor: pointer; user-select: none; }
+  .legend-edge-toggle:hover { background: #f0f0f0; }
+  .legend-edge-toggle.disabled { opacity: 0.4; }
+  .edge-solid, .edge-dashed {
+    display: inline-block; width: 24px; height: 0; vertical-align: middle;
+  }
+  .edge-solid  { border-top: 2px solid #666; }
+  .edge-dashed { border-top: 1px dashed #b0b0b0; }
+  #citracer-info h3 { margin: 0 0 6px 0; font-size: 14px; line-height: 1.3; }
+  #citracer-info .meta { color: #555; font-size: 12px; margin-bottom: 8px; }
+  #citracer-info .hits { background: #fafafa; border: 1px solid #eee;
+                         border-radius: 4px; padding: 8px; margin-top: 8px; }
+  #citracer-info .hit-snippet { font-size: 12px; line-height: 1.45;
+                                margin-bottom: 8px; padding-bottom: 8px;
+                                border-bottom: 1px dashed #e0e0e0; }
+  #citracer-info .hit-snippet:last-child { border-bottom: none; margin-bottom: 0; }
+  #citracer-info mark { color: #222; padding: 0 2px; border-radius: 2px; }
+  #citracer-info .hits-toggle {
+    color: #06c; font-size: 11px; cursor: pointer; user-select: none;
+    margin-top: 4px; display: inline-block;
+  }
+  #citracer-info .hits-toggle:hover { text-decoration: underline; }
+  #citracer-info .abstract-block {
+    background: #fafafa; border: 1px solid #eee; border-radius: 4px;
+    padding: 6px 10px; margin-top: 8px;
+  }
+  #citracer-info .abstract-block summary {
+    cursor: pointer; color: #06c; font-size: 11px; user-select: none;
+    list-style: none;
+  }
+  #citracer-info .abstract-block summary::-webkit-details-marker { display: none; }
+  #citracer-info .abstract-block summary::before {
+    content: "▶ "; font-size: 9px; display: inline-block;
+    transition: transform 0.15s;
+  }
+  #citracer-info .abstract-block[open] summary::before {
+    transform: rotate(90deg);
+  }
+  #citracer-info .abstract-block .abstract-body {
+    font-size: 12px; line-height: 1.5; color: #333;
+    margin-top: 6px;
+    max-height: 220px; overflow-y: auto;
+  }
+  #citracer-info a { color: #06c; text-decoration: none; }
+  #citracer-info a:hover { text-decoration: underline; }
+  #citracer-info .hint { color: #888; font-size: 11px; padding: 6px 0;
+                         font-style: italic; }
+  #citracer-context-menu {
+    position: fixed; display: none; z-index: 10000;
+    background: #ffffff; border: 1px solid #ccc; border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    font-family: sans-serif; font-size: 13px;
+    min-width: 140px; padding: 4px 0;
+  }
+  #citracer-context-menu .ctx-item {
+    padding: 6px 14px; cursor: pointer; user-select: none;
+    color: #222;
+  }
+  #citracer-context-menu .ctx-item:hover { background: #f0f0f0; }
+  #citracer-context-menu .ctx-sep {
+    height: 1px; background: #eee; margin: 4px 0;
+  }
+  #citracer-hidden-banner {
+    color: #06c; font-size: 11px; cursor: pointer; user-select: none;
+    padding: 4px 0;
+  }
+  #citracer-hidden-banner:hover { text-decoration: underline; }
+  #citracer-hidden-banner.empty { display: none; }
+  #citracer-reset {
+    color: #888; font-size: 10px; cursor: pointer; user-select: none;
+    padding: 4px 0; text-align: right;
+    border-top: 1px solid #eee; margin-top: 6px;
+  }
+  #citracer-reset:hover { color: #c33; text-decoration: underline; }
+  #citracer-reset.saved::before {
+    content: "💾 "; font-size: 10px;
+  }
+  .citracer-control {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 4px 0;
+  }
+  .citracer-control label { font-size: 11px; color: #888; }
+  .citracer-control select {
+    font-size: 12px; padding: 2px 6px; border: 1px solid #ccc;
+    border-radius: 4px; background: #fff; color: #222; cursor: pointer;
+    flex: 1; max-width: 180px;
+  }
+  .citracer-control select:hover { border-color: #888; }
+  .citracer-control input[type=range] {
+    flex: 1; max-width: 180px; cursor: pointer;
+    accent-color: #06c;
+  }
+  .citracer-control input[type=search] {
+    flex: 1; max-width: 180px; font-size: 12px;
+    padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px;
+  }
+  .citracer-control input[type=search]:focus {
+    outline: none; border-color: #06c;
+  }
+  .citracer-search-results {
+    max-height: 160px; overflow-y: auto; margin-top: 2px;
+  }
+  .citracer-search-results .result {
+    padding: 4px 6px; border-radius: 4px; font-size: 11px; cursor: pointer;
+    line-height: 1.3;
+  }
+  .citracer-search-results .result:hover {
+    background: #f0f0f0;
+  }
+  .citracer-search-results .result-title {
+    color: #222; font-weight: 500;
+  }
+  .citracer-search-results .result-meta {
+    color: #888; font-size: 10px;
+  }
+</style>
+
+<div id="citracer-legend" class="citracer-panel">
+  <div style="font-weight:bold;margin-bottom:6px;">💬 Citracer</div>
+  <div>keyword: {{KEYWORD_CHIPS}}</div>
+  <div id="citracer-counts">{{N_NODES}} papers · {{N_EDGES}} citations</div>
+
+  <hr style="border:none;border-top:1px solid #ddd;margin:8px 0;">
+  <div class="citracer-control">
+    <label for="citracer-layout">layout</label>
+    <select id="citracer-layout">
+      <option value="sugiyama-year" selected>Sugiyama (by year)</option>
+      <option value="sugiyama-depth">Sugiyama (by depth)</option>
+      <option value="force-directed">Force-directed (BarnesHut)</option>
+      <option value="fruchterman">Fruchterman-Reingold (approx)</option>
+    </select>
+  </div>
+  <div class="citracer-control">
+    <label for="citracer-size">node size</label>
+    <select id="citracer-size">
+      <option value="in-degree" selected>in-graph citations</option>
+      <option value="keyword-hits">keyword hits</option>
+    </select>
+  </div>
+  <div class="citracer-control">
+    <label for="citracer-spread">spread</label>
+    <input type="range" id="citracer-spread" min="0.3" max="3" step="0.05" value="1">
+  </div>
+  <div class="citracer-control">
+    <label for="citracer-search">search</label>
+    <input type="search" id="citracer-search" placeholder="title, author…" autocomplete="off">
+  </div>
+  <div id="citracer-search-results" class="citracer-search-results"></div>
+
+  <hr style="border:none;border-top:1px solid #ddd;margin:8px 0;">
+  <div style="font-size:11px;color:#888;margin-bottom:4px;">nodes (click to toggle)</div>
+{{LEGEND_ROWS}}
+  <div id="citracer-hidden-banner" class="empty">show N manually hidden</div>
+{{EDGES_LEGEND}}
+  <div id="citracer-reset" title="clear saved layout, filters and positions">reset saved state</div>
+</div>
+
+<div id="citracer-info" class="citracer-panel">
+  <span id="citracer-info-close" title="close (unpin)">×</span>
+  <div id="citracer-info-body"></div>
+</div>
+
+<div id="citracer-context-menu">
+  <div class="ctx-item" data-action="hide">Hide</div>
+  <div class="ctx-item" data-action="pin">Pin</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" data-action="open">Open link ↗</div>
+</div>
+
+<script>
+(function() {
+  const NODE_DETAILS = {{NODE_DETAILS_JSON}};
+  const KEYWORD_SPECS = {{KEYWORD_SPECS_JSON}};  // [{keyword, pattern, color}, ...]
+  const disabledStatus = new Set({{DEFAULT_DISABLED_JSON}});
+  // Edge type filter: secondary (bibliographic) edges start hidden
+  const disabledEdgeTypes = new Set(["secondary"]);
+  const expandedHits = new Set();
+  const expandedAbstracts = new Set();
+  // Nodes the user has explicitly hidden via right-click. Independent of
+  // the legend status filter — both are OR'd together in applyFilter().
+  const manuallyHidden = new Set();
+
+  // ---- persistence ---------------------------------------------------
+  // Session key derived from the set of node ids, so:
+  //   - refreshing the page reloads the same state
+  //   - re-running citracer with different papers gets a fresh state
+  //   - re-running with the SAME set of papers still reloads state
+  function _sessionHash() {
+    const ids = Object.keys(NODE_DETAILS).sort().join("|");
+    let h = 0x811c9dc5;
+    for (let i = 0; i < ids.length; i++) {
+      h ^= ids.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return h.toString(36);
+  }
+  const STATE_KEY = "citracer:" + _sessionHash();
+  let saveTimer = null;
+  let stateLoaded = false;
+
+  function saveState() {
+    // Debounce so rapid events (slider drag, physics settling) don't spam
+    // localStorage writes.
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      try {
+        const positions = (typeof network !== 'undefined' && network)
+          ? network.getPositions() : {};
+        const state = {
+          v: 1,
+          positions: positions,
+          pinned: pinnedNodeId,
+          disabledStatus: Array.from(disabledStatus),
+          disabledEdgeTypes: Array.from(disabledEdgeTypes),
+          manuallyHidden: Array.from(manuallyHidden),
+          layout: currentLayout,
+          sizeMode: currentSizeMode,
+          spread: currentSpread,
+        };
+        localStorage.setItem(STATE_KEY, JSON.stringify(state));
+        const reset = document.getElementById('citracer-reset');
+        if (reset) reset.classList.add('saved');
+      } catch (e) {
+        // quota exceeded / privacy mode / etc. — silently ignore
+      }
+    }, 300);
+  }
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STATE_KEY);
+      if (!raw) return null;
+      const state = JSON.parse(raw);
+      return state && state.v === 1 ? state : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearState() {
+    try { localStorage.removeItem(STATE_KEY); } catch (e) {}
+    const reset = document.getElementById('citracer-reset');
+    if (reset) reset.classList.remove('saved');
+  }
+
+  function applyLoadedState(state) {
+    // Apply filter / toggle state BEFORE positions so that applyFilter()
+    // can recompute sizes against the restored visibility set.
+    if (state.disabledStatus) {
+      disabledStatus.clear();
+      state.disabledStatus.forEach(s => disabledStatus.add(s));
+    }
+    if (state.disabledEdgeTypes) {
+      disabledEdgeTypes.clear();
+      state.disabledEdgeTypes.forEach(t => disabledEdgeTypes.add(t));
+    }
+    if (state.manuallyHidden) {
+      manuallyHidden.clear();
+      state.manuallyHidden.forEach(i => manuallyHidden.add(i));
+    }
+
+    // Sync UI classes to match the restored filter state
+    document.querySelectorAll('.legend-item').forEach(el => {
+      const s = el.getAttribute('data-status');
+      el.classList.toggle('disabled', disabledStatus.has(s));
+    });
+    document.querySelectorAll('.legend-edge-toggle').forEach(el => {
+      const t = el.getAttribute('data-edge-type');
+      el.classList.toggle('disabled', disabledEdgeTypes.has(t));
+    });
+
+    // Dropdowns
+    if (state.layout) {
+      currentLayout = state.layout;
+      const sel = document.getElementById('citracer-layout');
+      if (sel) sel.value = state.layout;
+    }
+    if (state.sizeMode) {
+      currentSizeMode = state.sizeMode;
+      const sel = document.getElementById('citracer-size');
+      if (sel) sel.value = state.sizeMode;
+    }
+    if (typeof state.spread === 'number') {
+      currentSpread = state.spread;
+      const slider = document.getElementById('citracer-spread');
+      if (slider) slider.value = String(state.spread);
+    }
+
+    // Restored positions are applied in tryAttach() (needs the network)
+  }
+  let currentNodeId = null;
+  let pinnedNodeId = null;  // when set, hover updates are ignored
+  let currentLayout = "sugiyama-year";
+  let currentSizeMode = "in-degree";
+  let currentSpread = 1.0;  // multiplier applied on top of the layout's natural spacing
+
+  // Compile one regex per keyword so we can colour matches individually.
+  const KEYWORD_REGEXES = KEYWORD_SPECS.map(s => {
+    try {
+      return { regex: new RegExp(s.pattern, 'gi'), color: s.color, keyword: s.keyword };
+    } catch (e) {
+      console.warn('citracer: regex compile failed for', s.keyword, e);
+      return null;
+    }
+  }).filter(Boolean);
+
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+
+  function highlightKeyword(text) {
+    // Collect every match across every keyword, then render them in
+    // sorted order so overlapping spans don't corrupt the output.
+    const safe = escapeHtml(text);
+    if (!KEYWORD_REGEXES.length) return safe;
+    const spans = [];
+    for (const kr of KEYWORD_REGEXES) {
+      kr.regex.lastIndex = 0;
+      let m;
+      while ((m = kr.regex.exec(safe)) !== null) {
+        spans.push({ start: m.index, end: m.index + m[0].length, color: kr.color });
+        if (m[0].length === 0) kr.regex.lastIndex++;  // avoid zero-width loop
+      }
+    }
+    if (!spans.length) return safe;
+    // Sort by start, drop overlaps (keep the earliest hit).
+    spans.sort((a, b) => a.start - b.start || a.end - b.end);
+    const nonOverlapping = [];
+    let lastEnd = -1;
+    for (const s of spans) {
+      if (s.start >= lastEnd) {
+        nonOverlapping.push(s);
+        lastEnd = s.end;
+      }
+    }
+    // Stitch the result.
+    let out = "";
+    let cursor = 0;
+    for (const s of nonOverlapping) {
+      out += safe.slice(cursor, s.start);
+      out += '<mark style="background:' + s.color + '">'
+           + safe.slice(s.start, s.end)
+           + '</mark>';
+      cursor = s.end;
+    }
+    out += safe.slice(cursor);
+    return out;
+  }
+
+  function renderMath(el) {
+    if (typeof renderMathInElement === 'function') {
+      try {
+        renderMathInElement(el, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '$',  right: '$',  display: false},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '\\[', right: '\\]', display: true},
+          ],
+          throwOnError: false,
+        });
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  function edgeType(e) {
+    // Secondary edges are added with `dashes: true`; primary edges aren't.
+    return e && e.dashes ? "secondary" : "primary";
+  }
+
+  function sizeForNode(nodeId, inDegree) {
+    const d = NODE_DETAILS[nodeId] || {};
+    let base;
+    if (currentSizeMode === "keyword-hits") {
+      base = 18 + 3 * ((d.keyword_hits && d.keyword_hits.length) || 0);
+    } else {
+      // in-graph citations: scale linearly with visible in-degree
+      base = 16 + 4.5 * (inDegree || 0);
+    }
+    if (d.status === "root") base = Math.max(base, 30);
+    return base;
+  }
+
+  function applyFilter() {
+    if (typeof nodes === 'undefined' || typeof edges === 'undefined') return;
+    // Nodes: hidden if status filter OR manual right-click hide
+    const nodeHidden = {};
+    const nodeUpdates = [];
+    nodes.forEach(n => {
+      const d = NODE_DETAILS[n.id];
+      const statusHidden = !!(d && disabledStatus.has(d.status));
+      const manualHidden = manuallyHidden.has(n.id);
+      const hidden = statusHidden || manualHidden;
+      nodeHidden[n.id] = hidden;
+      nodeUpdates.push({ id: n.id, hidden: hidden });
+    });
+    nodes.update(nodeUpdates);
+
+    // Update the "show N manually hidden" banner
+    const banner = document.getElementById('citracer-hidden-banner');
+    if (banner) {
+      if (manuallyHidden.size === 0) {
+        banner.classList.add('empty');
+      } else {
+        banner.classList.remove('empty');
+        banner.textContent = 'show ' + manuallyHidden.size + ' manually hidden';
+      }
+    }
+    // Edges: hide by edge type, AND respect node visibility
+    const edgeUpdates = [];
+    const inDegree = {};
+    nodes.forEach(n => { inDegree[n.id] = 0; });
+    edges.forEach(e => {
+      const typeHidden = disabledEdgeTypes.has(edgeType(e));
+      const endpointHidden = nodeHidden[e.from] || nodeHidden[e.to];
+      const hidden = typeHidden || endpointHidden;
+      edgeUpdates.push({ id: e.id, hidden: hidden });
+      if (!hidden) {
+        inDegree[e.to] = (inDegree[e.to] || 0) + 1;
+      }
+    });
+    edges.update(edgeUpdates);
+    // Recompute sizes from the visible in-degree we just counted
+    const sizeUpdates = [];
+    nodes.forEach(n => {
+      if (nodeHidden[n.id]) return;
+      const newSize = sizeForNode(n.id, inDegree[n.id] || 0);
+      if (n.size !== newSize) sizeUpdates.push({ id: n.id, size: newSize });
+    });
+    if (sizeUpdates.length) nodes.update(sizeUpdates);
+    // Recompute visible counts
+    let visibleNodes = 0;
+    nodes.forEach(n => { if (!n.hidden) visibleNodes++; });
+    let visibleEdges = 0;
+    edges.forEach(e => { if (!e.hidden) visibleEdges++; });
+    const counts = document.getElementById('citracer-counts');
+    if (counts) counts.textContent = visibleNodes + ' papers · ' + visibleEdges + ' citations';
+  }
+
+  // --- Layout switching ------------------------------------------------
+
+  const LAYOUT_CONFIGS = {
+    "sugiyama-year": {
+      levelField: "year_level",
+      layout: {
+        hierarchical: {
+          enabled: true, direction: "UD", sortMethod: "directed",
+          shakeTowards: "leaves", levelSeparation: 220, nodeSpacing: 220,
+          treeSpacing: 280, blockShifting: true, edgeMinimization: true,
+          parentCentralization: true,
+        }
+      },
+      physics: { enabled: false },
+    },
+    "sugiyama-depth": {
+      levelField: "depth_level",
+      layout: {
+        hierarchical: {
+          enabled: true, direction: "UD", sortMethod: "directed",
+          shakeTowards: "leaves", levelSeparation: 220, nodeSpacing: 220,
+          treeSpacing: 280, blockShifting: true, edgeMinimization: true,
+          parentCentralization: true,
+        }
+      },
+      physics: { enabled: false },
+    },
+    "force-directed": {
+      levelField: null,
+      layout: { hierarchical: { enabled: false } },
+      physics: {
+        enabled: true, solver: "barnesHut",
+        barnesHut: {
+          gravitationalConstant: -30000, centralGravity: 0.15,
+          springLength: 260, springConstant: 0.04, damping: 0.6,
+          avoidOverlap: 1.0,
+        },
+        stabilization: { enabled: true, iterations: 1500, fit: true },
+        minVelocity: 0.75,
+      },
+    },
+    "fruchterman": {
+      levelField: null,
+      layout: { hierarchical: { enabled: false } },
+      physics: {
+        enabled: true, solver: "forceAtlas2Based",
+        forceAtlas2Based: {
+          gravitationalConstant: -80, centralGravity: 0.008,
+          springLength: 220, springConstant: 0.08, damping: 0.6,
+          avoidOverlap: 1.0,
+        },
+        stabilization: { enabled: true, iterations: 1500, fit: true },
+        minVelocity: 0.75,
+      },
+    },
+  };
+
+  function applySpread(newMultiplier) {
+    // Scale every node's position from the current centroid, so the graph
+    // stretches or compresses around its middle without losing its shape.
+    if (typeof network === 'undefined' || !network) return;
+    const positions = network.getPositions();
+    const ids = Object.keys(positions);
+    if (!ids.length) return;
+    let cx = 0, cy = 0;
+    for (const id of ids) { cx += positions[id].x; cy += positions[id].y; }
+    cx /= ids.length; cy /= ids.length;
+    const ratio = newMultiplier / currentSpread;
+    currentSpread = newMultiplier;
+    const updates = [];
+    for (const id of ids) {
+      updates.push({
+        id: id,
+        x: cx + (positions[id].x - cx) * ratio,
+        y: cy + (positions[id].y - cy) * ratio,
+      });
+    }
+    nodes.update(updates);
+    network.fit();
+  }
+
+  function resetSpreadSlider() {
+    currentSpread = 1.0;
+    const slider = document.getElementById('citracer-spread');
+    if (slider) slider.value = '1';
+  }
+
+  function switchLayout(mode) {
+    const cfg = LAYOUT_CONFIGS[mode];
+    if (!cfg) return;
+    currentLayout = mode;
+    // A new layout has its own natural spacing, so rebase the slider.
+    resetSpreadSlider();
+
+    // For Sugiyama modes, rewrite each node's `level` from the chosen field.
+    if (cfg.levelField) {
+      const updates = [];
+      nodes.forEach(n => {
+        const d = NODE_DETAILS[n.id];
+        if (d && d[cfg.levelField] !== undefined) {
+          updates.push({ id: n.id, level: d[cfg.levelField] });
+        }
+      });
+      if (updates.length) nodes.update(updates);
+    }
+
+    // Apply layout + physics. Hierarchical re-runs on setOptions.
+    network.setOptions({ layout: cfg.layout, physics: cfg.physics });
+
+    // For Sugiyama, disable the hierarchical constraint shortly after
+    // layout has placed the nodes, so the user can drag them freely.
+    if (mode.startsWith("sugiyama")) {
+      setTimeout(() => {
+        network.setOptions({ layout: { hierarchical: { enabled: false } } });
+        network.fit();
+      }, 120);
+    } else {
+      // For physics-based layouts, freeze once stabilization is done.
+      network.once("stabilizationIterationsDone", () => {
+        network.setOptions({ physics: { enabled: false } });
+      });
+    }
+  }
+
+  function showInfo(nodeId) {
+    const d = NODE_DETAILS[nodeId];
+    if (!d) return;
+    const authors = (d.authors || []).slice(0, 8).join(', ')
+                  + ((d.authors || []).length > 8 ? ', et al.' : '');
+    let html = '<h3>' + escapeHtml(d.title) + '</h3>';
+    html += '<div class="meta">';
+    if (authors) html += escapeHtml(authors) + '<br>';
+    if (d.year) html += 'Year: ' + d.year + ' &middot; ';
+    html += 'Status: <b>' + escapeHtml(d.status) + '</b> &middot; depth ' + d.depth;
+    html += '</div>';
+    if (d.url) {
+      html += '<div><a href="' + escapeHtml(d.url) + '" target="_blank">open ↗</a></div>';
+    }
+    if (d.abstract) {
+      const abstractExpanded = expandedAbstracts.has(nodeId);
+      html += '<details class="abstract-block"'
+            + (abstractExpanded ? ' open' : '')
+            + ' data-node-id="' + escapeHtml(nodeId) + '">'
+            + '<summary>abstract</summary>'
+            + '<div class="abstract-body">' + escapeHtml(d.abstract) + '</div>'
+            + '</details>';
+    }
+    if (d.keyword_hits && d.keyword_hits.length) {
+      const expanded = expandedHits.has(nodeId);
+      const visible = expanded ? d.keyword_hits : d.keyword_hits.slice(0, 5);
+      html += '<div class="hits"><b>' + d.keyword_hits.length + ' keyword hit(s)</b>';
+      visible.forEach(h => {
+        html += '<div class="hit-snippet">' + highlightKeyword(h) + '</div>';
+      });
+      if (d.keyword_hits.length > 5) {
+        if (expanded) {
+          html += '<div class="hits-toggle" data-node-id="'
+                + escapeHtml(nodeId) + '" data-action="collapse">show fewer</div>';
+        } else {
+          html += '<div class="hits-toggle" data-node-id="'
+                + escapeHtml(nodeId) + '" data-action="expand">show '
+                + (d.keyword_hits.length - 5) + ' more</div>';
+        }
+      }
+      html += '</div>';
+    }
+    currentNodeId = nodeId;
+    const body = document.getElementById('citracer-info-body');
+    body.innerHTML = html;
+    document.getElementById('citracer-info').style.display = 'block';
+    renderMath(body);
+  }
+
+  // Event delegation for the show-more / show-fewer toggle
+  document.getElementById('citracer-info-body').addEventListener('click', (ev) => {
+    const t = ev.target.closest('.hits-toggle');
+    if (!t) return;
+    const id = t.getAttribute('data-node-id');
+    if (t.getAttribute('data-action') === 'expand') {
+      expandedHits.add(id);
+    } else {
+      expandedHits.delete(id);
+    }
+    showInfo(id);
+  });
+
+  // Event delegation for the abstract <details> — remember its open state
+  // so hover re-renders don't collapse it.
+  document.getElementById('citracer-info-body').addEventListener('toggle', (ev) => {
+    const det = ev.target;
+    if (!det || det.tagName !== 'DETAILS' || !det.classList.contains('abstract-block')) return;
+    const id = det.getAttribute('data-node-id');
+    if (!id) return;
+    if (det.open) expandedAbstracts.add(id);
+    else expandedAbstracts.delete(id);
+  }, true);  // useCapture=true because `toggle` doesn't bubble
+
+  document.querySelectorAll('.legend-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const status = el.getAttribute('data-status');
+      if (disabledStatus.has(status)) {
+        disabledStatus.delete(status);
+        el.classList.remove('disabled');
+      } else {
+        disabledStatus.add(status);
+        el.classList.add('disabled');
+      }
+      applyFilter();
+      saveState();
+    });
+  });
+
+  document.querySelectorAll('.legend-edge-toggle').forEach(el => {
+    el.addEventListener('click', () => {
+      const t = el.getAttribute('data-edge-type');
+      if (disabledEdgeTypes.has(t)) {
+        disabledEdgeTypes.delete(t);
+        el.classList.remove('disabled');
+      } else {
+        disabledEdgeTypes.add(t);
+        el.classList.add('disabled');
+      }
+      applyFilter();
+      saveState();
+    });
+  });
+
+  // Layout dropdown
+  const layoutSelect = document.getElementById('citracer-layout');
+  if (layoutSelect) {
+    layoutSelect.addEventListener('change', (ev) => {
+      switchLayout(ev.target.value);
+      saveState();
+    });
+  }
+
+  // Size mode dropdown
+  const sizeSelect = document.getElementById('citracer-size');
+  if (sizeSelect) {
+    sizeSelect.addEventListener('change', (ev) => {
+      currentSizeMode = ev.target.value;
+      applyFilter();  // triggers a size recomputation
+      saveState();
+    });
+  }
+
+  // Spread slider: rescales node positions around the centroid. Using
+  // 'input' makes it live during the drag.
+  const spreadSlider = document.getElementById('citracer-spread');
+  if (spreadSlider) {
+    spreadSlider.addEventListener('input', (ev) => {
+      applySpread(parseFloat(ev.target.value));
+      saveState();
+    });
+  }
+
+  // Reset button — clears saved state and reloads the page to start fresh
+  const resetBtn = document.getElementById('citracer-reset');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      if (confirm('Clear saved layout, filters and node positions?')) {
+        clearState();
+        location.reload();
+      }
+    });
+  }
+
+  // --- search box ------------------------------------------------------
+  function runSearch(query) {
+    const results = document.getElementById('citracer-search-results');
+    if (!results) return;
+    results.innerHTML = '';
+    if (!query || query.length < 2) return;
+    const q = query.toLowerCase();
+    const matches = [];
+    for (const id in NODE_DETAILS) {
+      const d = NODE_DETAILS[id];
+      const title = (d.title || '').toLowerCase();
+      const authors = (d.authors || []).join(' ').toLowerCase();
+      let score = 0;
+      if (title.includes(q)) score += 10;
+      if (authors.includes(q)) score += 5;
+      if (score > 0) matches.push({ id: id, score: score, d: d });
+    }
+    matches.sort((a, b) => b.score - a.score);
+    matches.slice(0, 8).forEach(m => {
+      const div = document.createElement('div');
+      div.className = 'result';
+      const shortTitle = (m.d.title || '').slice(0, 70)
+                      + ((m.d.title || '').length > 70 ? '…' : '');
+      const firstAuthor = (m.d.authors || [])[0] || '';
+      div.innerHTML = '<div class="result-title">' + escapeHtml(shortTitle) + '</div>'
+                    + '<div class="result-meta">'
+                    + escapeHtml(firstAuthor)
+                    + (m.d.year ? ' · ' + m.d.year : '')
+                    + '</div>';
+      div.addEventListener('click', () => {
+        if (typeof network !== 'undefined' && network) {
+          network.focus(m.id, {
+            scale: 1.3,
+            animation: { duration: 400, easingFunction: 'easeInOutQuad' },
+          });
+          network.selectNodes([m.id]);
+          showInfo(m.id);
+          setPinned(m.id);
+        }
+      });
+      results.appendChild(div);
+    });
+  }
+  const searchBox = document.getElementById('citracer-search');
+  if (searchBox) {
+    let debounce = null;
+    searchBox.addEventListener('input', (ev) => {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => runSearch(ev.target.value), 120);
+    });
+    // Enter → focus the first result
+    searchBox.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        const first = document.querySelector('.citracer-search-results .result');
+        if (first) first.click();
+      }
+    });
+  }
+
+  // Cache of original (borderWidth, color) pairs so we can restore a node's
+  // look when it gets unpinned.
+  const pinRestore = new Map();
+
+  function setPinned(nodeId) {
+    // Restore the previously pinned node, if any.
+    if (pinnedNodeId && pinnedNodeId !== nodeId) {
+      const saved = pinRestore.get(pinnedNodeId);
+      if (saved) {
+        nodes.update({
+          id: pinnedNodeId,
+          borderWidth: saved.borderWidth,
+          color: saved.color,
+        });
+        pinRestore.delete(pinnedNodeId);
+      }
+    }
+    pinnedNodeId = nodeId;
+    const panel = document.getElementById('citracer-info');
+    if (nodeId) {
+      // Cache the current look and apply the pinned look.
+      const n = nodes.get(nodeId);
+      if (n && !pinRestore.has(nodeId)) {
+        pinRestore.set(nodeId, {
+          borderWidth: n.borderWidth || 1,
+          color: n.color,
+        });
+      }
+      const baseBg = (n && n.color && n.color.background) || '#ffffff';
+      nodes.update({
+        id: nodeId,
+        borderWidth: 5,
+        color: {
+          background: baseBg,
+          border: '#06c',
+          highlight: { background: baseBg, border: '#06c' },
+          hover: { background: baseBg, border: '#06c' },
+        },
+      });
+      panel.classList.add('pinned');
+    } else {
+      panel.classList.remove('pinned');
+    }
+  }
+
+  // --- context menu --------------------------------------------------
+  let contextMenuNodeId = null;
+
+  function openContextMenu(nodeId, clientX, clientY) {
+    contextMenuNodeId = nodeId;
+    const menu = document.getElementById('citracer-context-menu');
+    if (!menu) return;
+    const d = NODE_DETAILS[nodeId] || {};
+    // Toggle the "Open link" row — hide it when there's no URL
+    const openItem = menu.querySelector('[data-action="open"]');
+    if (openItem) openItem.style.display = d.url ? '' : 'none';
+    // Toggle Pin label
+    const pinItem = menu.querySelector('[data-action="pin"]');
+    if (pinItem) pinItem.textContent = (pinnedNodeId === nodeId) ? 'Unpin' : 'Pin';
+    menu.style.display = 'block';
+    // Clamp to viewport
+    const menuRect = menu.getBoundingClientRect();
+    const maxX = window.innerWidth - menuRect.width - 6;
+    const maxY = window.innerHeight - menuRect.height - 6;
+    menu.style.left = Math.min(clientX, maxX) + 'px';
+    menu.style.top  = Math.min(clientY, maxY) + 'px';
+  }
+
+  function closeContextMenu() {
+    const menu = document.getElementById('citracer-context-menu');
+    if (menu) menu.style.display = 'none';
+    contextMenuNodeId = null;
+  }
+
+  document.getElementById('citracer-context-menu').addEventListener('click', (ev) => {
+    const item = ev.target.closest('.ctx-item');
+    if (!item || !contextMenuNodeId) return;
+    const action = item.getAttribute('data-action');
+    const nodeId = contextMenuNodeId;
+    const d = NODE_DETAILS[nodeId] || {};
+    if (action === 'hide') {
+      manuallyHidden.add(nodeId);
+      if (pinnedNodeId === nodeId) {
+        setPinned(null);
+        document.getElementById('citracer-info').style.display = 'none';
+      }
+      applyFilter();
+      saveState();
+    } else if (action === 'pin') {
+      if (pinnedNodeId === nodeId) {
+        setPinned(null);
+      } else {
+        showInfo(nodeId);
+        setPinned(nodeId);
+      }
+      saveState();
+    } else if (action === 'open') {
+      if (d.url) window.open(d.url, '_blank');
+    }
+    closeContextMenu();
+  });
+
+  // Dismiss context menu on any outside click or Escape
+  document.addEventListener('click', (ev) => {
+    const menu = document.getElementById('citracer-context-menu');
+    if (menu && !menu.contains(ev.target)) closeContextMenu();
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') closeContextMenu();
+  });
+
+  // "show N manually hidden" banner → restore all
+  const hiddenBanner = document.getElementById('citracer-hidden-banner');
+  if (hiddenBanner) {
+    hiddenBanner.addEventListener('click', () => {
+      manuallyHidden.clear();
+      applyFilter();
+      saveState();
+    });
+  }
+
+  // Info panel close button (×) — unpins and hides the panel
+  const infoClose = document.getElementById('citracer-info-close');
+  if (infoClose) {
+    infoClose.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      setPinned(null);
+      currentNodeId = null;
+      document.getElementById('citracer-info').style.display = 'none';
+      saveState();
+    });
+  }
+
+  // Wait for the network to be created by pyvis, then wire events.
+  function tryAttach() {
+    if (typeof network !== 'undefined' && network) {
+      const saved = loadState();
+      if (saved) {
+        // Non-position state first, so applyFilter() sees correct toggles
+        applyLoadedState(saved);
+        stateLoaded = true;
+      }
+
+      // If we have saved positions, bypass the Sugiyama layout entirely
+      // and snap nodes back where the user left them. Otherwise run the
+      // normal "let hierarchical lay it out, then release" dance.
+      if (saved && saved.positions && Object.keys(saved.positions).length) {
+        network.setOptions({
+          layout: { hierarchical: { enabled: false } },
+          physics: { enabled: false },
+        });
+        const moveUpdates = [];
+        for (const id in saved.positions) {
+          const p = saved.positions[id];
+          if (p && typeof p.x === 'number' && typeof p.y === 'number') {
+            moveUpdates.push({ id: id, x: p.x, y: p.y });
+          }
+        }
+        if (moveUpdates.length) nodes.update(moveUpdates);
+        setTimeout(() => network.fit(), 0);
+        const reset = document.getElementById('citracer-reset');
+        if (reset) reset.classList.add('saved');
+      } else {
+        setTimeout(() => {
+          network.setOptions({ layout: { hierarchical: { enabled: false } } });
+          network.fit();
+        }, 120);
+      }
+
+      // Live update on hover (ignored while pinned)
+      network.on('hoverNode', params => {
+        if (pinnedNodeId) return;
+        showInfo(params.node);
+      });
+      // Click on a node: pin it (or unpin if already pinned). A click on
+      // the empty canvas is deliberately a no-op — the pin survives until
+      // the user either clicks the pinned node again, presses the X on
+      // the info panel, or picks Unpin from the right-click menu.
+      network.on('click', params => {
+        closeContextMenu();
+        if (!(params.nodes && params.nodes.length)) return;
+        const id = params.nodes[0];
+        if (pinnedNodeId === id) {
+          setPinned(null);
+          currentNodeId = null;
+          document.getElementById('citracer-info').style.display = 'none';
+        } else {
+          showInfo(id);
+          setPinned(id);
+        }
+        saveState();
+      });
+
+      // Right-click on a node = context menu
+      network.on('oncontext', params => {
+        // Always suppress the browser's native menu on the canvas
+        if (params.event) params.event.preventDefault();
+        const clicked = network.getNodeAt(params.pointer.DOM);
+        if (clicked) {
+          openContextMenu(clicked, params.event.clientX, params.event.clientY);
+        } else {
+          closeContextMenu();
+        }
+      });
+
+      // Persist positions after the user finishes dragging a node
+      network.on('dragEnd', () => saveState());
+
+      applyFilter();
+
+      // Re-apply pinned state AFTER applyFilter (which resizes nodes, which
+      // can reset the border style we use for the pin indicator)
+      if (saved && saved.pinned && NODE_DETAILS[saved.pinned]) {
+        showInfo(saved.pinned);
+        setPinned(saved.pinned);
+      }
+      return true;
+    }
+    return false;
+  }
+  if (!tryAttach()) {
+    const t = setInterval(() => { if (tryAttach()) clearInterval(t); }, 200);
+  }
+})();
+</script>
