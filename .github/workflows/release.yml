@@ -1,0 +1,95 @@
+name: Release & Publish
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'pyproject.toml'
+
+jobs:
+  check-version-changed:
+    runs-on: ubuntu-latest
+    outputs:
+      version_changed: ${{ steps.version-change.outputs.version_changed }}
+      version: ${{ steps.version-change.outputs.version }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Fetch all history
+        run: git fetch --unshallow
+      - name: Check if version changed
+        id: version-change
+        run: |
+          MAIN_COMMIT=$(git rev-parse origin/main^1)
+          MAIN_VERSION=$(git show "$MAIN_COMMIT:pyproject.toml" | grep -Po '^version\s*=\s*"\K[^"]+')
+          HEAD_VERSION=$(grep -Po '^version\s*=\s*"\K[^"]+' pyproject.toml)
+          echo "Main version: $MAIN_VERSION"
+          echo "Head version: $HEAD_VERSION"
+          if [ "$MAIN_VERSION" != "$HEAD_VERSION" ]; then
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+          fi
+          echo "version=$HEAD_VERSION" >> $GITHUB_OUTPUT
+
+  release:
+    needs: check-version-changed
+    if: needs.check-version-changed.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create and Push Tag
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          NEW_TAG="v${{ needs.check-version-changed.outputs.version }}"
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
+      - name: Generate Release Notes
+        id: generate_release_notes
+        run: |
+          NEW_TAG="v${{ needs.check-version-changed.outputs.version }}"
+          LAST_TAG=$(git describe --tags --abbrev=0 "$NEW_TAG^" 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            RELEASE_NOTES=$(git log --pretty=format:"- %s" --reverse)
+          else
+            RELEASE_NOTES=$(git log "$LAST_TAG"..."$NEW_TAG" --pretty=format:"- %s" --reverse)
+          fi
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_OUTPUT
+          echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "v${{ needs.check-version-changed.outputs.version }}"
+          tag_name: "v${{ needs.check-version-changed.outputs.version }}"
+          body: ${{ steps.generate_release_notes.outputs.RELEASE_NOTES }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: [check-version-changed, release]
+    if: needs.check-version-changed.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+      - name: Build and publish
+        env:
+          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        run: |
+          python -m build
+          twine upload dist/*
