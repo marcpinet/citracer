@@ -2,6 +2,8 @@
 
 # citracer
 
+https://github.com/user-attachments/assets/36855b62-a9ab-4404-90c3-9ac7f418899c
+
 ## 📝 Description
 
 Trace citation chains for any keyword across research papers.
