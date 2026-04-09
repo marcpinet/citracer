@@ -172,14 +172,14 @@ A control panel in the top-left corner of the graph lets you tune the view on th
 | Control | Options | Effect |
 |---|---|---|
 | **layout** | Sugiyama (by year) *(default)*<br>Sugiyama (by depth)<br>Force-directed (BarnesHut)<br>Fruchterman-Reingold (approx) | Switches the layout algorithm. Sugiyama-by-year places the oldest papers at the top, making it easy to spot which paper first introduced the concept |
-| **node size** | in-graph citations *(default)*<br>keyword hits | `in-graph citations` scales node size with the number of incoming edges visible in the graph (so nodes get bigger/smaller as you toggle bibliographic links). `keyword hits` scales by the count of keyword occurrences in the paper's body |
+| **node size** | in-graph citations *(default)*<br>keyword hits<br>PageRank<br>betweenness | `in-graph citations` scales node size with the number of incoming edges visible in the graph. `keyword hits` scales by the count of keyword occurrences. `PageRank` and `betweenness` use the corresponding centrality metric computed on the citation graph |
 | **spread** | slider (0.3× to 3.0×) | Rescales all node positions from the graph's centroid, stretching or compressing the layout without deforming it. Works with any layout mode |
 | **nodes (legend)** | click rows to toggle | Hide/show nodes by status |
 | **edges (legend)** | click rows to toggle | Hide/show edges by type (keyword-associated vs. bibliographic link) |
 
 Other interactive features:
 
-- **Hover** any node → side panel updates live with title, authors, year, citation count, status, keyword hits (with highlighted occurrences) and a collapsible **abstract** section when available
+- **Hover** any node → side panel updates live with title, authors, year, citation count, status, centrality metrics (PageRank, betweenness, in/out degree), a **PIVOT** badge for pivot papers, keyword hits (with highlighted occurrences) and a collapsible **abstract** section when available
 - **Search** box in the control panel → fuzzy match by title or author, click a result to focus-and-pin the matching node
 - **Click** a node → pins the panel; a blue border is drawn around the node to show the pinned state. The pin survives clicks on the empty canvas, hover on other nodes, and pan/zoom. It's only released by clicking the same node again, pressing the × close button on the info panel, or picking **Unpin** from the right-click menu
 - **Right-click** any node → context menu with **Hide** (permanently hides the node until you click the "show N manually hidden" banner in the legend), **Pin/Unpin**, and **Open link** (opens the arxiv/OpenReview/DOI page in a new tab)
@@ -187,6 +187,37 @@ Other interactive features:
 - **`show N more`** in a panel with many hits → expands the full list
 - **LaTeX math** in passages is rendered with [KaTeX](https://katex.org) (`$...$`, `$$...$$`, `\(...\)`, `\[...\]`)
 - **Automatic state persistence**. Node positions, filters, pin state, dropdowns, spread slider and manually hidden nodes are all saved to `localStorage` keyed on a hash of the node-id set. A browser refresh restores the exact view you had. A new trace with a different paper set gets a fresh slate. The **reset saved state** link at the bottom of the legend clears everything and reloads. A 💾 icon appears next to the reset link while state is present
+
+### Bibliometric analytics
+
+Every trace automatically computes quantitative metrics on the citation graph:
+
+| Metric | Scope | Description |
+|---|---|---|
+| **PageRank** | per-node | Importance of a paper relative to the citation structure |
+| **Betweenness centrality** | per-node | Identifies "bridge" papers that connect different clusters |
+| **In/out degree** | per-node | Number of incoming/outgoing edges in the graph |
+| **Pivot detection** | per-node | Flags the earliest keyword-matched paper in each connected component, plus high-betweenness papers with the keyword |
+| **Graph density** | global | Ratio of actual edges to maximum possible edges |
+| **Avg degree** | global | Mean number of connections per node |
+| **Connected components** | global | Number of weakly connected subgraphs |
+| **Keyword density timeline** | global | Per-year breakdown: total papers, papers with keyword, usage density |
+
+The **analytics** collapsible section in the control panel shows global metrics, a clickable list of pivot papers (clicking focuses the node), and a keyword density timeline table with mini bar charts. Per-node metrics appear in the info panel when hovering or clicking a node.
+
+All analytics are included in the JSON export (`"analytics"` key), the GraphML export (betweenness, pagerank, is_pivot as node attributes), and the reproducibility manifest.
+
+### Reproducibility
+
+Every trace generates a `manifest.json` alongside the graph output, encoding everything needed to reproduce the exact same graph:
+
+- **citracer version**, **timestamp**, **full CLI command**
+- **Source paper**: type (pdf/doi/arxiv/url), raw input value, resolved title/DOI/arXiv ID
+- **Parameters**: keywords, match mode, depth, context window, consolidate, reverse, enrich, GROBID URL
+- **Environment**: Python version, platform, GROBID availability, API key/email status
+- **Results**: node/edge counts, status breakdown, analytics summary (global metrics, timeline, pivot papers)
+
+This allows anyone receiving a citracer graph to re-run the trace with identical settings. The manifest is also embedded in JSON exports under the `"metadata"` key.
 
 ## 🔍 How it works
 
@@ -211,7 +242,9 @@ Other interactive features:
 
 6. **Cross-graph bibliographic links.** After the recursive trace is complete, a post-processing pass scans every parsed paper's bibliography against every other node in the graph and adds dashed "bibliographic link" edges for pairs that cite each other but not in the keyword's neighborhood. Matching is exact on DOI/arXiv IDs and fuzzy (rapidfuzz, threshold 88) on titles. No external API calls are needed: everything runs on the already-in-memory graph, so the cost is negligible.
 
-7. **Rendering.** The graph is serialized to an interactive HTML page using [pyvis](https://pyvis.readthedocs.io/), with a custom overlay providing the layout/size/spread controls, the legend filters, the side info panel, keyword highlighting, and KaTeX math.
+7. **Bibliometric analytics.** After the trace completes, citracer computes per-node centrality metrics (PageRank, betweenness) and graph-wide statistics (density, connected components, keyword density timeline) using [networkx](https://networkx.org/). Pivot papers — the earliest keyword-matched paper in each connected component, plus high-betweenness nodes with the keyword — are automatically flagged. A reproducibility manifest (`manifest.json`) is written alongside the graph, encoding the full trace parameters, environment, and results.
+
+8. **Rendering.** The graph is serialized to an interactive HTML page using [pyvis](https://pyvis.readthedocs.io/), with a custom overlay providing the layout/size/spread controls, the legend filters, the side info panel, keyword highlighting, and KaTeX math.
 
 ### Reverse trace mode (`--reverse`)
 
@@ -235,10 +268,12 @@ citracer/
 ├── preprint_resolver.py    # maps DOIs to preprint server PDF URLs (bioRxiv, medRxiv, ChemRxiv, SSRN, PsyArXiv, AgriXiv, engrXiv)
 ├── metadata_enrichment.py  # OpenAlex API client for enriching nodes with abstract, citation count, and OA URLs
 ├── metadata_cache.py       # SQLite-backed key/value store for resolver metadata, thread-safe
+├── analytics.py            # bibliometric metrics: PageRank, betweenness, pivot detection, timeline
 ├── cross_citation.py       # post-trace pass that adds dashed bibliographic-only edges between graph nodes
 ├── tracer.py               # BFS recursion with parallel parsing, deduplication, year anchoring
 ├── visualizer.py           # pyvis rendering pipeline
-├── exporter.py             # GraphML / JSON export
+├── exporter.py             # GraphML / JSON export (includes analytics and manifest)
+├── manifest.py             # reproducibility manifest generation
 ├── models.py               # dataclasses
 ├── api_types.py            # TypedDicts for arxiv / Semantic Scholar / OpenReview / OpenAlex payloads
 ├── constants.py            # every tunable threshold and timeout, in one place
@@ -259,6 +294,7 @@ citracer/
 | [pysbd](https://github.com/nipunsadvilkar/pySBD) | Sentence boundary detection |
 | [pyvis](https://pyvis.readthedocs.io/) | Interactive HTML graph rendering |
 | [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) | Fuzzy title matching |
+| [networkx](https://networkx.org/) | Graph analytics (centrality, components, PageRank) |
 | [requests](https://requests.readthedocs.io/) | HTTP client |
 | [tqdm](https://github.com/tqdm/tqdm) | Progress bar |
 | [python-dotenv](https://github.com/theskumar/python-dotenv) | Loading the Semantic Scholar key from a `.env` file |
@@ -272,6 +308,7 @@ External APIs:
 - [OpenReview API](https://docs.openreview.net/reference/api-v2)
 - [OpenAlex API](https://docs.openalex.org/) (metadata enrichment, opt-in via `--enrich`)
 - [Sci-Hub](https://sci-hub.in/) (paywall bypass for PDF download)
+- Preprint servers: [bioRxiv](https://www.biorxiv.org/), [medRxiv](https://www.medrxiv.org/), [ChemRxiv](https://chemrxiv.org/), [SSRN](https://www.ssrn.com/), [PsyArXiv](https://psyarxiv.com/), [AgriXiv](https://agrixiv.org/), [engrXiv](https://engrxiv.org/) (PDF download via DOI detection)
 
 ## ⚠️ Limitations
 
