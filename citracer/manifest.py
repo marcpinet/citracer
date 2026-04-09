@@ -38,6 +38,7 @@ def build_manifest(
     s2_key_set: bool,
     email_set: bool,
     depth: int,
+    analytics: dict | None = None,
 ) -> dict:
     """Build a reproducibility manifest from the trace parameters and results.
 
@@ -104,6 +105,11 @@ def build_manifest(
             "nodes": len(graph.nodes),
             "edges": len(graph.edges),
             "by_status": dict(status_counts),
+            "analytics": {
+                "global": analytics.get("global", {}) if analytics else {},
+                "timeline": analytics.get("timeline", []) if analytics else [],
+                "pivot_papers": analytics.get("pivot_papers", []) if analytics else [],
+            },
         },
         "command": command,
     }

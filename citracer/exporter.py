@@ -29,6 +29,7 @@ def export_graph(
     path: str | Path,
     fmt: str | None = None,
     manifest: dict | None = None,
+    analytics: dict | None = None,
 ) -> Path:
     """Write ``graph`` to ``path`` in the format derived from the file
     extension (``.json`` or ``.graphml``), or from the explicit ``fmt``
@@ -39,9 +40,9 @@ def export_graph(
     fmt = (fmt or out.suffix.lstrip(".")).lower()
 
     if fmt == "json":
-        _export_json(graph, out, manifest=manifest)
+        _export_json(graph, out, manifest=manifest, analytics=analytics)
     elif fmt == "graphml":
-        _export_graphml(graph, out)
+        _export_graphml(graph, out, analytics=analytics)
     else:
         raise ValueError(
             f"Unknown export format {fmt!r}. Use 'json' or 'graphml'."
@@ -55,10 +56,17 @@ def export_graph(
 # JSON
 # ---------------------------------------------------------------------------
 
-def _export_json(graph: TracerGraph, out: Path, manifest: dict | None = None) -> None:
+def _export_json(
+    graph: TracerGraph,
+    out: Path,
+    manifest: dict | None = None,
+    analytics: dict | None = None,
+) -> None:
     payload: dict = {}
     if manifest:
         payload["metadata"] = manifest
+    if analytics:
+        payload["analytics"] = analytics
     payload["nodes"] = [
         {
             "id": n.paper_id,
@@ -106,6 +114,9 @@ _GRAPHML_KEYS = [
     ("citation_count", "node", "citation_count", "int"),
     ("url",          "node", "url",          "string"),
     ("keyword_hits", "node", "keyword_hits", "int"),
+    ("betweenness",  "node", "betweenness",  "double"),
+    ("pagerank",     "node", "pagerank",     "double"),
+    ("is_pivot",     "node", "is_pivot",     "boolean"),
 
     ("edge_type",    "edge", "edge_type",    "string"),
     ("edge_depth",   "edge", "depth",        "int"),
@@ -113,7 +124,7 @@ _GRAPHML_KEYS = [
 ]
 
 
-def _export_graphml(graph: TracerGraph, out: Path) -> None:
+def _export_graphml(graph: TracerGraph, out: Path, analytics: dict | None = None) -> None:
     lines: list[str] = []
     lines.append('<?xml version="1.0" encoding="UTF-8"?>')
     lines.append(
@@ -144,6 +155,11 @@ def _export_graphml(graph: TracerGraph, out: Path) -> None:
         _data(lines, "citation_count", n.citation_count)
         _data(lines, "url", n.url)
         _data(lines, "keyword_hits", len(n.keyword_hits))
+        if analytics:
+            nm = analytics.get("node_metrics", {}).get(n.paper_id, {})
+            _data(lines, "betweenness", nm.get("betweenness"))
+            _data(lines, "pagerank", nm.get("pagerank"))
+            _data(lines, "is_pivot", nm.get("is_pivot"))
         lines.append("    </node>")
 
     for i, e in enumerate(graph.edges):

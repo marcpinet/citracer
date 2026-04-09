@@ -10,7 +10,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-from . import pdf_parser, tracer, user_config, visualizer
+from . import analytics, pdf_parser, tracer, user_config, visualizer
 from .constants import GROBID_DEFAULT_WORKERS
 from .exporter import export_graph
 from .manifest import build_manifest, save_manifest
@@ -346,6 +346,12 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("Graph: %d nodes, %d edges", len(graph.nodes), len(graph.edges))
 
+    # Compute bibliometric analytics
+    analytics_data = analytics.analyze(graph)
+    n_pivots = len(analytics_data.get("pivot_papers", []))
+    if n_pivots:
+        logger.info("Analytics: %d pivot paper(s) detected", n_pivots)
+
     # Build the root source descriptor for the manifest.
     if args.pdf:
         root_source = {"type": "pdf", "value": args.pdf}
@@ -364,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         s2_key_set=bool(s2_key),
         email_set=bool(email),
         depth=depth,
+        analytics=analytics_data,
     )
     save_manifest(manifest, Path(args.output).parent)
 
@@ -378,13 +385,14 @@ def main(argv: list[str] | None = None) -> int:
         keyword=keywords,
         show_details=args.details,
         default_layout=default_layout,
+        analytics=analytics_data,
     )
     logger.info("Wrote %s", out_path)
 
     # Optional graph exports (JSON / GraphML).
     for export_path in args.export or []:
         try:
-            export_graph(graph, export_path, manifest=manifest)
+            export_graph(graph, export_path, manifest=manifest, analytics=analytics_data)
         except Exception as e:
             logger.error("Export to %s failed: %s", export_path, e)
 

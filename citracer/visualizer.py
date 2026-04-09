@@ -45,6 +45,7 @@ def render(
     keyword: str | list[str] = "",
     show_details: bool = False,
     default_layout: str = "sugiyama-year",
+    analytics: dict | None = None,
 ) -> Path:
     # Normalize: always work with a list of keywords internally.
     keywords: list[str] = [keyword] if isinstance(keyword, str) else list(keyword)
@@ -159,7 +160,7 @@ def render(
 
     net.write_html(str(output), notebook=False, open_browser=False)
     _fix_pyvis_html(output)
-    _inject_overlay(output, keywords, graph, node_details, has_secondary_edges, default_layout)
+    _inject_overlay(output, keywords, graph, node_details, has_secondary_edges, default_layout, analytics)
     return output
 
 
@@ -261,6 +262,7 @@ def _inject_overlay(
     node_details: dict[str, dict],
     has_secondary_edges: bool = False,
     default_layout: str = "sugiyama-year",
+    analytics: dict | None = None,
 ) -> None:
     """Inject the control panel, legend, and side info panel into the pyvis
     HTML output. The template lives in templates/overlay.html.tmpl and uses
@@ -327,6 +329,7 @@ def _inject_overlay(
         "{{KEYWORD_SPECS_JSON}}":     json.dumps(kw_specs),
         "{{DEFAULT_DISABLED_JSON}}":  json.dumps(default_disabled),
         "{{DEFAULT_LAYOUT}}":         effective_layout,
+        "{{ANALYTICS_JSON}}":         json.dumps(analytics or {}),
     }
 
     overlay = _load_overlay_template()

@@ -171,6 +171,8 @@
     <select id="citracer-size">
       <option value="in-degree" selected>in-graph citations</option>
       <option value="keyword-hits">keyword hits</option>
+      <option value="pagerank">PageRank</option>
+      <option value="betweenness">betweenness</option>
     </select>
   </div>
   <div class="citracer-control">
@@ -188,6 +190,10 @@
 {{LEGEND_ROWS}}
   <div id="citracer-hidden-banner" class="empty">show N manually hidden</div>
 {{EDGES_LEGEND}}
+  <details id="citracer-analytics-section" style="margin-top:8px;">
+    <summary style="cursor:pointer;font-size:11px;color:#888;user-select:none;">analytics</summary>
+    <div id="citracer-analytics-body" style="font-size:11px;margin-top:4px;"></div>
+  </details>
   <div id="citracer-reset" title="clear saved layout, filters and positions">reset saved state</div>
 </div>
 
@@ -206,6 +212,7 @@
 <script>
 (function() {
   const NODE_DETAILS = {{NODE_DETAILS_JSON}};
+  const ANALYTICS = {{ANALYTICS_JSON}};
   const KEYWORD_SPECS = {{KEYWORD_SPECS_JSON}};  // [{keyword, pattern, color}, ...]
   const disabledStatus = new Set({{DEFAULT_DISABLED_JSON}});
   // Edge type filter: secondary (bibliographic) edges start hidden
@@ -410,9 +417,15 @@
 
   function sizeForNode(nodeId, inDegree) {
     const d = NODE_DETAILS[nodeId] || {};
+    const nm = (ANALYTICS.node_metrics || {})[nodeId] || {};
     let base;
     if (currentSizeMode === "keyword-hits") {
       base = 18 + 3 * ((d.keyword_hits && d.keyword_hits.length) || 0);
+    } else if (currentSizeMode === "pagerank") {
+      // Scale PageRank (typically 0-1) to a visible size range
+      base = 16 + 200 * Math.sqrt(nm.pagerank || 0);
+    } else if (currentSizeMode === "betweenness") {
+      base = 16 + 120 * Math.sqrt(nm.betweenness || 0);
     } else {
       base = 16 + 6 * Math.sqrt(inDegree || 0);
     }
@@ -710,6 +723,16 @@
     if (d.citation_count != null) html += 'Citations: ' + d.citation_count + ' &middot; ';
     html += 'Status: <b>' + escapeHtml(d.status) + '</b> &middot; depth ' + d.depth;
     html += '</div>';
+    // Per-node analytics
+    const nm = (ANALYTICS.node_metrics || {})[nodeId];
+    if (nm) {
+      html += '<div class="meta" style="color:#666;">';
+      html += 'PageRank: ' + nm.pagerank.toFixed(4) + ' &middot; ';
+      html += 'Betweenness: ' + nm.betweenness.toFixed(4) + ' &middot; ';
+      html += 'In: ' + nm.in_degree + ' &middot; Out: ' + nm.out_degree;
+      if (nm.is_pivot) html += ' &middot; <b style="color:#d62728;">PIVOT</b>';
+      html += '</div>';
+    }
     if (d.url) {
       html += '<div><a href="' + escapeHtml(d.url) + '" target="_blank">open ↗</a></div>';
     }
@@ -842,6 +865,56 @@
       }
     });
   }
+
+  // --- analytics panel --------------------------------------------------
+  (function populateAnalytics() {
+    const body = document.getElementById('citracer-analytics-body');
+    if (!body || !ANALYTICS.global) return;
+    const g = ANALYTICS.global;
+    let h = '';
+    h += '<div>Density: ' + g.density.toFixed(4) + '</div>';
+    h += '<div>Avg degree: ' + g.avg_degree.toFixed(2) + '</div>';
+    h += '<div>Components: ' + g.connected_components + '</div>';
+    // Pivot papers
+    const pivots = ANALYTICS.pivot_papers || [];
+    if (pivots.length) {
+      h += '<div style="margin-top:6px;font-weight:bold;">Pivot papers (' + pivots.length + ')</div>';
+      pivots.forEach(function(pid) {
+        const d = NODE_DETAILS[pid];
+        const label = d ? (d.title || '').substring(0, 40) + (d.year ? ' (' + d.year + ')' : '') : pid;
+        h += '<div class="citracer-pivot-link" data-node-id="' + escapeHtml(pid) + '" '
+           + 'style="cursor:pointer;color:#1f77b4;text-decoration:underline;margin:2px 0;">'
+           + escapeHtml(label) + '</div>';
+      });
+    }
+    // Timeline
+    const tl = ANALYTICS.timeline || [];
+    if (tl.length) {
+      h += '<div style="margin-top:6px;font-weight:bold;">Keyword density by year</div>';
+      h += '<table style="font-size:10px;width:100%;border-collapse:collapse;">';
+      h += '<tr><th>Year</th><th>Total</th><th>w/ kw</th><th>Density</th></tr>';
+      tl.forEach(function(t) {
+        const pct = (t.keyword_density * 100).toFixed(0) + '%';
+        const bar = '<span style="display:inline-block;width:' + Math.round(t.keyword_density * 50)
+                   + 'px;height:8px;background:#2ca02c;vertical-align:middle;"></span>';
+        h += '<tr><td>' + t.year + '</td><td>' + t.total + '</td><td>' + t.with_keyword
+           + '</td><td>' + pct + ' ' + bar + '</td></tr>';
+      });
+      h += '</table>';
+    }
+    body.innerHTML = h;
+    // Click on pivot paper -> focus node
+    body.querySelectorAll('.citracer-pivot-link').forEach(function(el) {
+      el.addEventListener('click', function() {
+        const nid = this.getAttribute('data-node-id');
+        if (network) {
+          network.focus(nid, { scale: 1.2, animation: true });
+          network.selectNodes([nid]);
+          showInfo(nid);
+        }
+      });
+    });
+  })();
 
   // --- search box ------------------------------------------------------
   function runSearch(query) {
