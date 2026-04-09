@@ -10,7 +10,7 @@ Trace citation chains for any keyword across research papers.
 
 Given a source PDF and a keyword, citracer parses the bibliography with GROBID, finds every occurrence of the keyword in the body, identifies the references cited near each occurrence, downloads those papers, and recursively walks the resulting citation graph. The output is an interactive HTML page.
 
-> **Supported sources.** citracer currently resolves cited papers through three external services: [arXiv](https://arxiv.org/), [Semantic Scholar](https://www.semanticscholar.org/), and [OpenReview](https://openreview.net/) (for ICLR / TMLR papers not on arXiv). Workshop proceedings, books, and paywalled journal articles are not retrievable and appear as `unavailable` nodes in the graph.
+> **Supported sources.** citracer resolves cited papers through [arXiv](https://arxiv.org/), [Semantic Scholar](https://www.semanticscholar.org/), [OpenReview](https://openreview.net/), [Sci-Hub](https://sci-hub.in/), and Semantic Scholar's open-access PDF links (which cover PMC, publisher OA pages, and more). Preprint servers [bioRxiv](https://www.biorxiv.org/), [medRxiv](https://www.medrxiv.org/), [ChemRxiv](https://chemrxiv.org/), [SSRN](https://www.ssrn.com/), [PsyArXiv](https://psyarxiv.com/), [AgriXiv](https://agrixiv.org/), and [engrXiv](https://engrxiv.org/) are also supported. Papers that still can't be downloaded appear as `unavailable` nodes, but can be enriched with metadata (title, abstract, year, citation count) via [OpenAlex](https://openalex.org/) using the `--enrich` flag. You can also supply a local PDF for any unavailable node with `--supply-pdf`.
 
 ![citracer interactive graph](https://raw.githubusercontent.com/marcpinet/citracer/main/readme_data/graph.png)
 
@@ -57,6 +57,14 @@ The key can be provided in three ways, in order of precedence:
 
    Other config commands: `citracer config show`, `citracer config get-s2-key` (masked), `citracer config clear-s2-key`, `citracer config path`. The file is created with mode `600` on POSIX so other local users can't read it.
 
+An **OpenAlex email** is optional but recommended when using `--enrich`. It activates the [polite pool](https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication) (10 req/s vs 1 req/s anonymous). Set it once via:
+
+   ```bash
+   citracer config set-email your@email.com
+   ```
+
+   Or pass it via `--email` or the `OPENALEX_EMAIL` environment variable.
+
 4. A `.env` file at the project root (copy `.env.example` and fill it in):
 
    ```
@@ -78,9 +86,11 @@ citracer --pdf test_data/crossad.pdf --keyword "channel-independent" --depth 5
 # From an arXiv id (auto-downloads the root PDF)
 citracer --arxiv 2211.14730 --keyword "self-attention"
 
-# From a DOI or URL
+# From a DOI or URL (arXiv, OpenReview, bioRxiv, medRxiv, SSRN)
 citracer --doi 10.48550/arxiv.2211.14730 --keyword "patching"
+citracer --doi 10.1016/j.isci.2018.09.017 --keyword "attention"
 citracer --url https://openreview.net/forum?id=cGDAkQo1C0p --keyword "instance normalization"
+citracer --url https://www.biorxiv.org/content/10.1101/2024.01.01.123456v1 --keyword "CRISPR"
 
 # Multi-keyword tracing (union by default, --match-mode all for intersection)
 citracer --pdf paper.pdf --keyword "channel-independent" --keyword "patching"
@@ -88,6 +98,12 @@ citracer --pdf paper.pdf --keyword "channel-independent" --keyword "patching"
 # Reverse trace: find papers that cite the source while mentioning the keyword
 # in their citation context. No PDF downloads, pure S2 metadata. Limit is optional.
 citracer --arxiv 2211.14730 --keyword "channel-independent" --reverse --reverse-limit 500
+
+# Enrich unavailable nodes with metadata (abstract, citation count) via OpenAlex
+citracer --pdf paper.pdf --keyword "attention" --enrich --email your@email.com
+
+# Supply a local PDF for a node that citracer couldn't download
+citracer --pdf paper.pdf --keyword "attention" --supply-pdf "doi:10.1234/foo=~/papers/foo.pdf"
 
 # Export the graph for downstream analysis
 citracer --pdf paper.pdf --keyword "..." --export out/graph.json --export out/graph.graphml
@@ -98,9 +114,9 @@ citracer --pdf paper.pdf --keyword "..." --export out/graph.json --export out/gr
 | Flag | Description |
 |---|---|
 | `--pdf` | Path to a local source PDF |
-| `--doi` | DOI of the source paper (e.g. `10.48550/arxiv.2211.14730`). Generic DOIs are resolved via Semantic Scholar |
+| `--doi` | DOI of the source paper (e.g. `10.48550/arxiv.2211.14730`). Resolved via S2 + Sci-Hub + OA links + preprint servers |
 | `--arxiv` | arXiv id of the source paper (e.g. `2211.14730`). Downloaded directly from arxiv.org |
-| `--url` | URL of the source paper (arxiv.org, doi.org, or openreview.net) |
+| `--url` | URL of the source paper (arxiv.org, doi.org, openreview.net, biorxiv.org, medrxiv.org, ssrn.com) |
 
 ### Trace options
 
@@ -116,6 +132,9 @@ citracer --pdf paper.pdf --keyword "..." --export out/graph.json --export out/gr
 | `--s2-api-key` | none | Semantic Scholar API key (see Installation for priority order) |
 | `--reverse` | off | Reverse trace: instead of walking down the source paper's bibliography, walk UP to papers that cite it. Filters citations by matching the keyword against [Semantic Scholar citation contexts](https://api.semanticscholar.org/api-docs/graph) (the 1-2 sentences around each citation), so no PDFs are downloaded. Default `--depth` remains 1 in this mode |
 | `--reverse-limit` | `500` | Max number of citing papers to fetch per level in reverse mode. Protects against runaway expansion on papers with thousands of citations |
+| `--enrich` | off | Enable metadata enrichment via [OpenAlex](https://openalex.org/) for nodes missing abstract, citation count, or year. Anonymous mode (1 req/s); combine with `--email` for 10x faster lookups |
+| `--email` | none | Email for OpenAlex polite pool (10 req/s). Implies `--enrich`. Can also be set via `OPENALEX_EMAIL` env var or `citracer config set-email` |
+| `--supply-pdf` | none | Supply a local PDF for a specific node. Format: `ID=PATH` where ID is the `paper_id` from a previous graph export (e.g. `doi:10.1234/foo=paper.pdf`). Repeat for multiple papers |
 
 ### Output
 
@@ -160,7 +179,7 @@ A control panel in the top-left corner of the graph lets you tune the view on th
 
 Other interactive features:
 
-- **Hover** any node → side panel updates live with title, authors, year, status, keyword hits (with highlighted occurrences) and a collapsible **abstract** section when available
+- **Hover** any node → side panel updates live with title, authors, year, citation count, status, keyword hits (with highlighted occurrences) and a collapsible **abstract** section when available
 - **Search** box in the control panel → fuzzy match by title or author, click a result to focus-and-pin the matching node
 - **Click** a node → pins the panel; a blue border is drawn around the node to show the pinned state. The pin survives clicks on the empty canvas, hover on other nodes, and pan/zoom. It's only released by clicking the same node again, pressing the × close button on the info panel, or picking **Unpin** from the right-click menu
 - **Right-click** any node → context menu with **Hide** (permanently hides the node until you click the "show N manually hidden" banner in the legend), **Pin/Unpin**, and **Open link** (opens the arxiv/OpenReview/DOI page in a new tab)
@@ -180,10 +199,13 @@ Other interactive features:
 4. **Reference resolution.** Each cited paper is resolved through the following cascade:
    1. If GROBID extracted a DOI or arXiv ID, use it directly.
    2. Otherwise, search arXiv by title (phrase first, then keyword fallback, with rapidfuzz validation).
-   3. If arXiv has nothing, query Semantic Scholar with 429-aware backoff.
+   3. If arXiv has nothing, query Semantic Scholar with 429-aware backoff (also retrieves citation count and open-access PDF URL).
    4. As a last resort, search OpenReview (covers ICLR/TMLR papers not on arXiv).
+   5. If `--enrich` is set, query OpenAlex for missing metadata (abstract, citation count, OA URL).
 
-   Resolved PDFs are cached in `./cache/pdfs/`.
+   PDF download cascade (in order): user-supplied PDF (`--supply-pdf`) > arXiv > OpenReview > Sci-Hub (by DOI, tries multiple mirrors) > S2 open-access URL (covers PMC, publisher OA, bioRxiv, medRxiv, etc.) > preprint-specific download (bioRxiv, medRxiv, ChemRxiv, SSRN, PsyArXiv, AgriXiv, engrXiv).
+
+   All resolved PDFs and metadata are cached in `./cache/`.
 
 5. **Recursion.** The tracer is a BFS that processes papers in queue order. Each level's PDFs are parsed in parallel via a thread pool (`--grobid-workers`, default 4), and the reference resolves inside a single paper are also parallelized. Deduplication uses a canonical ID (DOI > arXiv > OpenReview > title hash). When the same PDF is reached via a second path, the new edge is added without re-parsing. Years from bibliography entries can backfill a node's year when older (e.g. a preprint v1 2022 takes precedence over a publication year 2023), but only within a ±2 year window of the first year we ever saw for that node. This prevents cascading from parser mistakes.
 
@@ -208,16 +230,19 @@ citracer/
 ├── cli.py                  # argparse entry point + GROBID health check + .env loader
 ├── pdf_parser.py           # GROBID + TEI walking + figure-noise filter + paragraph merge + narrative ref supplementation + pymupdf fallback
 ├── keyword_matcher.py      # morphological regex + sentence-based ref association (pysbd)
-├── reference_resolver.py   # arXiv-first cascade resolver (arxiv → S2 → OpenReview) with SQLite cache
+├── reference_resolver.py   # arXiv-first cascade resolver (arxiv → S2 → OpenReview → Sci-Hub → OA → preprints) with SQLite cache
 ├── source_resolver.py      # routes --pdf / --doi / --arxiv / --url inputs to a local PDF path
+├── preprint_resolver.py    # maps DOIs to preprint server PDF URLs (bioRxiv, medRxiv, ChemRxiv, SSRN, PsyArXiv, AgriXiv, engrXiv)
+├── metadata_enrichment.py  # OpenAlex API client for enriching nodes with abstract, citation count, and OA URLs
 ├── metadata_cache.py       # SQLite-backed key/value store for resolver metadata, thread-safe
 ├── cross_citation.py       # post-trace pass that adds dashed bibliographic-only edges between graph nodes
 ├── tracer.py               # BFS recursion with parallel parsing, deduplication, year anchoring
 ├── visualizer.py           # pyvis rendering pipeline
 ├── exporter.py             # GraphML / JSON export
 ├── models.py               # dataclasses
-├── api_types.py            # TypedDicts for arxiv / Semantic Scholar / OpenReview payloads
+├── api_types.py            # TypedDicts for arxiv / Semantic Scholar / OpenReview / OpenAlex payloads
 ├── constants.py            # every tunable threshold and timeout, in one place
+├── user_config.py          # persistent user-level config (~/.citracer/config.json)
 ├── utils.py                # ID normalization, hashing, tqdm-safe logging setup
 └── templates/
     └── overlay.html.tmpl   # the interactive control panel (HTML/CSS/JS) injected into the pyvis output
@@ -245,6 +270,8 @@ External APIs:
 - [arXiv API](https://info.arxiv.org/help/api/index.html)
 - [Semantic Scholar Graph API](https://api.semanticscholar.org/api-docs/graph)
 - [OpenReview API](https://docs.openreview.net/reference/api-v2)
+- [OpenAlex API](https://docs.openalex.org/) (metadata enrichment, opt-in via `--enrich`)
+- [Sci-Hub](https://sci-hub.in/) (paywall bypass for PDF download)
 
 ## ⚠️ Limitations
 
@@ -252,7 +279,7 @@ External APIs:
 - The narrative-citation supplementation pass skips ambiguous `(surname, year)` signatures (e.g. two different Zhou 2022 papers in the bibliography). These missed cases are rare but do happen in survey-heavy papers.
 - pysbd handles most academic abbreviations but can occasionally split mid-sentence; falling back to `--context-window 300` is sometimes useful.
 - arXiv enforces ~3 seconds between requests, so the first run on a deep trace can take several minutes. The local cache makes subsequent runs fast.
-- Only three sources are supported for resolving cited papers: [arXiv](https://arxiv.org/), [Semantic Scholar](https://www.semanticscholar.org/) and [OpenReview](https://openreview.net/). Workshop papers, books, and journal articles without an open-access PDF on one of these platforms appear as `unavailable` red nodes.
+- Papers that cannot be resolved through any source in the download cascade (arXiv, OpenReview, Sci-Hub, S2 open-access, preprint servers) appear as `unavailable` red nodes. Books and some workshop proceedings are typically not retrievable. Use `--supply-pdf` to provide PDFs manually for these nodes.
 - The "Fruchterman-Reingold" layout option is implemented via vis.js's `forceAtlas2Based` solver, which is the closest approximation available natively. A proper Kamada-Kawai implementation isn't offered because vis.js doesn't ship one.
 
 ## 🧪 Development
