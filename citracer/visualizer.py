@@ -2,6 +2,7 @@
 from __future__ import annotations
 import html
 import json
+import re
 from importlib import resources
 from pathlib import Path
 
@@ -157,6 +158,7 @@ def render(
     net.set_options(json.dumps(options))
 
     net.write_html(str(output), notebook=False, open_browser=False)
+    _fix_pyvis_html(output)
     _inject_overlay(output, keywords, graph, node_details, has_secondary_edges, default_layout)
     return output
 
@@ -233,6 +235,23 @@ def _short_label(node) -> str:
         title = title[:49] + "…"
     year = f" ({node.year})" if node.year else ""
     return title + year
+
+
+def _fix_pyvis_html(html_path: Path) -> None:
+    """Fix quirks-mode and broken local script references in pyvis output.
+
+    pyvis generates ``<html>`` without a doctype (triggering quirks mode in
+    browsers) and references ``lib/bindings/utils.js`` which doesn't exist.
+    """
+    text = html_path.read_text(encoding="utf-8")
+    if not text.lstrip().startswith("<!DOCTYPE"):
+        text = "<!DOCTYPE html>\n" + text
+    text = re.sub(
+        r'<script\s+src="lib/bindings/utils\.js"\s*>\s*</script>\s*\n?',
+        "",
+        text,
+    )
+    html_path.write_text(text, encoding="utf-8")
 
 
 def _inject_overlay(
