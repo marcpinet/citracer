@@ -298,6 +298,20 @@ CI runs the suite on Python 3.10 / 3.11 / 3.12 via GitHub Actions on every
 push to `main`, every pull request, and on manual dispatch from the Actions
 tab. See `.github/workflows/tests.yml`.
 
+## 📖 Citation
+
+If you use citracer in your research, please cite it as:
+
+```bibtex
+@software{pinet2026citracer,
+  author       = {Pinet, Marc},
+  title        = {citracer: Keyword-Driven Citation Graph Tracer},
+  year         = {2026},
+  url          = {https://github.com/marcpinet/citracer},
+  note         = {Python package available at \url{https://pypi.org/project/citracer/}}
+}
+```
+
 ## ✍️ Authors
 
 - Marc Pinet - *Initial work* - [marcpinet](https://github.com/marcpinet)
