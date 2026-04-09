@@ -24,7 +24,12 @@ from .models import TracerGraph
 logger = logging.getLogger(__name__)
 
 
-def export_graph(graph: TracerGraph, path: str | Path, fmt: str | None = None) -> Path:
+def export_graph(
+    graph: TracerGraph,
+    path: str | Path,
+    fmt: str | None = None,
+    manifest: dict | None = None,
+) -> Path:
     """Write ``graph`` to ``path`` in the format derived from the file
     extension (``.json`` or ``.graphml``), or from the explicit ``fmt``
     argument if given.
@@ -34,7 +39,7 @@ def export_graph(graph: TracerGraph, path: str | Path, fmt: str | None = None) -
     fmt = (fmt or out.suffix.lstrip(".")).lower()
 
     if fmt == "json":
-        _export_json(graph, out)
+        _export_json(graph, out, manifest=manifest)
     elif fmt == "graphml":
         _export_graphml(graph, out)
     else:
@@ -50,36 +55,37 @@ def export_graph(graph: TracerGraph, path: str | Path, fmt: str | None = None) -
 # JSON
 # ---------------------------------------------------------------------------
 
-def _export_json(graph: TracerGraph, out: Path) -> None:
-    payload = {
-        "nodes": [
-            {
-                "id": n.paper_id,
-                "title": n.title,
-                "authors": n.authors,
-                "year": n.year,
-                "status": n.status,
-                "depth": n.depth,
-                "doi": n.doi,
-                "arxiv_id": n.arxiv_id,
-                "abstract": n.abstract,
-                "citation_count": n.citation_count,
-                "url": n.url,
-                "keyword_hits": n.keyword_hits,
-            }
-            for n in graph.nodes.values()
-        ],
-        "edges": [
-            {
-                "source": e.source_id,
-                "target": e.target_id,
-                "type": e.edge_type,
-                "depth": e.depth,
-                "context": e.context,
-            }
-            for e in graph.edges
-        ],
-    }
+def _export_json(graph: TracerGraph, out: Path, manifest: dict | None = None) -> None:
+    payload: dict = {}
+    if manifest:
+        payload["metadata"] = manifest
+    payload["nodes"] = [
+        {
+            "id": n.paper_id,
+            "title": n.title,
+            "authors": n.authors,
+            "year": n.year,
+            "status": n.status,
+            "depth": n.depth,
+            "doi": n.doi,
+            "arxiv_id": n.arxiv_id,
+            "abstract": n.abstract,
+            "citation_count": n.citation_count,
+            "url": n.url,
+            "keyword_hits": n.keyword_hits,
+        }
+        for n in graph.nodes.values()
+    ]
+    payload["edges"] = [
+        {
+            "source": e.source_id,
+            "target": e.target_id,
+            "type": e.edge_type,
+            "depth": e.depth,
+            "context": e.context,
+        }
+        for e in graph.edges
+    ]
     out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 

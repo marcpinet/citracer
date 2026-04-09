@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from . import pdf_parser, tracer, user_config, visualizer
 from .constants import GROBID_DEFAULT_WORKERS
 from .exporter import export_graph
+from .manifest import build_manifest, save_manifest
 from .reference_resolver import ReferenceResolver
 from .source_resolver import resolve_source
 from .utils import make_paper_id, setup_logging
@@ -344,6 +345,28 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     logger.info("Graph: %d nodes, %d edges", len(graph.nodes), len(graph.edges))
+
+    # Build the root source descriptor for the manifest.
+    if args.pdf:
+        root_source = {"type": "pdf", "value": args.pdf}
+    elif args.doi:
+        root_source = {"type": "doi", "value": args.doi}
+    elif args.arxiv:
+        root_source = {"type": "arxiv", "value": args.arxiv}
+    else:
+        root_source = {"type": "url", "value": args.url}
+
+    manifest = build_manifest(
+        args=args,
+        graph=graph,
+        root_source=root_source,
+        grobid_available=_check_grobid(args.grobid_url),
+        s2_key_set=bool(s2_key),
+        email_set=bool(email),
+        depth=depth,
+    )
+    save_manifest(manifest, Path(args.output).parent)
+
     # Reverse mode produces a "star" topology (many citers pointing to one
     # root) which reads much better with a force-directed layout than with
     # Sugiyama by year, so we seed the dropdown differently. The user can
@@ -361,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
     # Optional graph exports (JSON / GraphML).
     for export_path in args.export or []:
         try:
-            export_graph(graph, export_path)
+            export_graph(graph, export_path, manifest=manifest)
         except Exception as e:
             logger.error("Export to %s failed: %s", export_path, e)
 
