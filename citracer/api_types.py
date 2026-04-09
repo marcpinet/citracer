@@ -38,6 +38,7 @@ class S2Paper(TypedDict, total=False):
     abstract: str | None
     externalIds: S2ExternalIds
     openAccessPdf: S2OpenAccessPdf | None
+    citationCount: int | None
 
 
 class S2SearchResponse(TypedDict, total=False):
@@ -49,7 +50,8 @@ class S2SearchResponse(TypedDict, total=False):
 
 class NormalizedMeta(TypedDict, total=False):
     """Uniform shape we build internally after normalizing results from
-    arXiv / S2 / OpenReview. All optional; any subset may be present."""
+    arXiv / S2 / OpenReview / OpenAlex. All optional; any subset may be
+    present."""
     title: str | None
     authors: list[str]
     year: int | None
@@ -57,6 +59,8 @@ class NormalizedMeta(TypedDict, total=False):
     doi: str | None
     arxiv_id: str | None
     openreview_id: str | None
+    citation_count: int | None
+    open_access_url: str | None
 
 
 class OpenReviewCandidate(TypedDict, total=False):

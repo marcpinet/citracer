@@ -63,6 +63,7 @@ def _export_json(graph: TracerGraph, out: Path) -> None:
                 "doi": n.doi,
                 "arxiv_id": n.arxiv_id,
                 "abstract": n.abstract,
+                "citation_count": n.citation_count,
                 "url": n.url,
                 "keyword_hits": n.keyword_hits,
             }
@@ -96,6 +97,7 @@ _GRAPHML_KEYS = [
     ("doi",          "node", "doi",          "string"),
     ("arxiv_id",     "node", "arxiv_id",     "string"),
     ("abstract",     "node", "abstract",     "string"),
+    ("citation_count", "node", "citation_count", "int"),
     ("url",          "node", "url",          "string"),
     ("keyword_hits", "node", "keyword_hits", "int"),
 
@@ -133,6 +135,7 @@ def _export_graphml(graph: TracerGraph, out: Path) -> None:
         _data(lines, "doi", n.doi)
         _data(lines, "arxiv_id", n.arxiv_id)
         _data(lines, "abstract", n.abstract)
+        _data(lines, "citation_count", n.citation_count)
         _data(lines, "url", n.url)
         _data(lines, "keyword_hits", len(n.keyword_hits))
         lines.append("    </node>")

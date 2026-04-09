@@ -31,6 +31,18 @@ _OPENREVIEW_URL_RE = re.compile(
     r"^https?://openreview\.net/(?:forum|pdf)\?id=(?P<id>[\w-]+)",
     re.IGNORECASE,
 )
+_BIORXIV_URL_RE = re.compile(
+    r"^https?://(?:www\.)?biorxiv\.org/content/(?P<doi>10\.\d+/.+?)(?:v\d+)?(?:\.full)?(?:\.pdf)?/?$",
+    re.IGNORECASE,
+)
+_MEDRXIV_URL_RE = re.compile(
+    r"^https?://(?:www\.)?medrxiv\.org/content/(?P<doi>10\.\d+/.+?)(?:v\d+)?(?:\.full)?(?:\.pdf)?/?$",
+    re.IGNORECASE,
+)
+_SSRN_URL_RE = re.compile(
+    r"^https?://(?:papers\.)?ssrn\.com/sol3/papers\.cfm\?abstract_id=(?P<id>\d+)",
+    re.IGNORECASE,
+)
 
 
 def resolve_source(
@@ -70,11 +82,24 @@ def resolve_source(
                 m = _OPENREVIEW_URL_RE.match(url.strip())
                 if m:
                     return _download_openreview(m.group("id"), resolver)
-                else:
-                    raise ValueError(
-                        f"Unrecognised URL (expected arxiv.org / doi.org / "
-                        f"openreview.net): {url}"
-                    )
+
+                m = _BIORXIV_URL_RE.match(url.strip())
+                if not m:
+                    m = _MEDRXIV_URL_RE.match(url.strip())
+                if m:
+                    doi = m.group("doi")
+                    return _download_by_doi(doi, resolver)
+
+                m = _SSRN_URL_RE.match(url.strip())
+                if m:
+                    ssrn_doi = f"10.2139/ssrn.{m.group('id')}"
+                    return _download_by_doi(ssrn_doi, resolver)
+
+                raise ValueError(
+                    f"Unrecognised URL (expected arxiv.org / doi.org / "
+                    f"openreview.net / biorxiv.org / medrxiv.org / "
+                    f"ssrn.com): {url}"
+                )
 
     if arxiv_id:
         aid = normalize_arxiv_id(arxiv_id)
@@ -100,22 +125,55 @@ def resolve_source(
                 raise ValueError(f"Could not download arXiv paper {aid}")
             return path
 
-        # General DOI: ask Semantic Scholar for the externalIds, then try
-        # arxiv download if an ArXiv id is known. This reuses the existing
-        # resolver pipeline without duplicating logic.
-        logger.info("Looking up DOI %s via Semantic Scholar", d)
-        meta = resolver._s2_by_id(f"DOI:{d}")  # type: ignore[attr-defined]
-        if meta and meta.get("arxiv_id"):
-            path = resolver._download_arxiv(meta["arxiv_id"])  # type: ignore[attr-defined]
-            if path:
-                return path
-        raise ValueError(
-            f"Could not find an open-access PDF for DOI {d}. "
-            "citracer can only trace papers available on arXiv or OpenReview."
-        )
+        # General DOI: try the full download cascade (S2 → Sci-Hub → OA → preprint).
+        return _download_by_doi(d, resolver)
 
     # Unreachable — the "exactly one" check above catches this.
     raise ValueError("No source provided.")
+
+
+def _download_by_doi(doi: str, resolver: ReferenceResolver) -> Path:
+    """Resolve a DOI to a downloadable PDF via the resolver's cascade
+    (Sci-Hub, S2 open-access, preprint servers)."""
+    d = normalize_doi(doi)
+    if not d:
+        raise ValueError(f"Invalid DOI: {doi!r}")
+    logger.info("Resolving root from DOI %s", d)
+
+    # Try S2 first for metadata + arxiv redirect
+    meta = resolver._s2_by_id(f"DOI:{d}")  # type: ignore[attr-defined]
+    if meta and meta.get("arxiv_id"):
+        path = resolver._download_arxiv(meta["arxiv_id"])  # type: ignore[attr-defined]
+        if path:
+            return path
+
+    # Try Sci-Hub
+    path = resolver._download_scihub(d)  # type: ignore[attr-defined]
+    if path:
+        return path
+
+    # Try S2 open-access URL
+    if meta and meta.get("open_access_url"):
+        from .utils import make_paper_id
+        pid = make_paper_id(doi=d)
+        path = resolver._download_generic_pdf(meta["open_access_url"], pid)  # type: ignore[attr-defined]
+        if path:
+            return path
+
+    # Try preprint-specific download
+    from .preprint_resolver import build_preprint_pdf_url
+    from .utils import make_paper_id
+    pdf_url = build_preprint_pdf_url(d, meta.get("open_access_url") if meta else None)
+    if pdf_url:
+        pid = make_paper_id(doi=d)
+        path = resolver._download_generic_pdf(pdf_url, pid)  # type: ignore[attr-defined]
+        if path:
+            return path
+
+    raise ValueError(
+        f"Could not find a downloadable PDF for DOI {d}. "
+        "Try providing the PDF directly with --pdf."
+    )
 
 
 def _download_openreview(forum_id: str, resolver: ReferenceResolver) -> Path:

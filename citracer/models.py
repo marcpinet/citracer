@@ -55,6 +55,7 @@ class PaperNode:
     arxiv_id: str | None = None
     doi: str | None = None
     abstract: str | None = None
+    citation_count: int | None = None
     keyword_hits: list[str] = field(default_factory=list)
     status: str = "pending"  # "analyzed" | "unavailable" | "no_match" | "root"
     depth: int = 0

@@ -16,14 +16,20 @@ class _FakeResolver:
     returns canned results from a local path."""
 
     def __init__(self, *, tmp_path: Path, fake_pdf_name: str = "fake.pdf",
-                 arxiv_meta: dict | None = None):
+                 arxiv_meta: dict | None = None,
+                 scihub_returns: bool = False):
         self.tmp_path = tmp_path
+        self.pdf_dir = tmp_path / "pdfs"
+        self.pdf_dir.mkdir(exist_ok=True)
         self.fake_pdf = tmp_path / fake_pdf_name
         self.fake_pdf.write_bytes(b"%PDF-1.4 fake content")
         self.arxiv_meta = arxiv_meta
+        self.scihub_returns = scihub_returns
         self.arxiv_calls: list[str] = []
         self.openreview_calls: list[str] = []
         self.s2_calls: list[str] = []
+        self.scihub_calls: list[str] = []
+        self.generic_calls: list[str] = []
 
     def _download_arxiv(self, arxiv_id: str) -> Path | None:
         self.arxiv_calls.append(arxiv_id)
@@ -36,6 +42,14 @@ class _FakeResolver:
     def _s2_by_id(self, id_str: str) -> dict | None:
         self.s2_calls.append(id_str)
         return self.arxiv_meta
+
+    def _download_scihub(self, doi: str) -> Path | None:
+        self.scihub_calls.append(doi)
+        return self.fake_pdf if self.scihub_returns else None
+
+    def _download_generic_pdf(self, url: str, paper_id: str) -> Path | None:
+        self.generic_calls.append(url)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +156,7 @@ class TestDoiInput:
 
     def test_generic_doi_no_arxiv_raises(self, tmp_path):
         r = _FakeResolver(tmp_path=tmp_path, arxiv_meta=None)
-        with pytest.raises(ValueError, match="Could not find an open-access PDF"):
+        with pytest.raises(ValueError, match="Could not find a downloadable PDF"):
             resolve_source(
                 pdf=None, doi="10.1/unresolvable",
                 arxiv_id=None, url=None, resolver=r,

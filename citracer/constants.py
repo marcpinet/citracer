@@ -95,6 +95,29 @@ ARXIV_KEYWORD_SEARCH_MAX_WORDS: int = 8
 #: Minimum length for a title word to count in the keyword fallback query.
 ARXIV_KEYWORD_SEARCH_MIN_WORD_LEN: int = 4
 
+#: Sci-Hub mirror URLs, tried in order. The first one that responds wins.
+SCIHUB_MIRRORS: tuple[str, ...] = (
+    "https://www.sci-hub.in",
+    "https://sci-hub.hlgczx.com",
+)
+
+#: Timeout for Sci-Hub page fetch and PDF download (seconds).
+SCIHUB_TIMEOUT_SECONDS: float = 30.0
+
+
+# ---------------------------------------------------------------------------
+# OpenAlex metadata enrichment (metadata_enrichment.py)
+# ---------------------------------------------------------------------------
+
+#: Minimum interval between OpenAlex requests with an email (polite pool).
+OPENALEX_MIN_INTERVAL_WITH_EMAIL: float = 0.2
+
+#: Minimum interval between OpenAlex requests without an email (anonymous).
+OPENALEX_MIN_INTERVAL_WITHOUT_EMAIL: float = 1.0
+
+#: OpenAlex request timeout (seconds).
+OPENALEX_TIMEOUT_SECONDS: float = 15.0
+
 
 # ---------------------------------------------------------------------------
 # Tracer (tracer.py)

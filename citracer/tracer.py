@@ -140,6 +140,7 @@ def trace(
                 arxiv_id=parent_resolved.arxiv_id,
                 doi=parent_resolved.doi,
                 abstract=parent_resolved.abstract,
+                citation_count=parent_resolved.citation_count,
                 depth=depth,
                 url=parent_resolved.url,
             )
@@ -266,6 +267,7 @@ def trace(
                         arxiv_id=resolved.arxiv_id,
                         doi=resolved.doi,
                         abstract=resolved.abstract,
+                        citation_count=resolved.citation_count,
                         status="unavailable",
                         depth=depth + 1,
                         url=resolved.url,

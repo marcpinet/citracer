@@ -38,6 +38,8 @@ from .constants import (
     S2_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
     S2_MIN_INTERVAL_WITH_KEY,
     S2_MIN_INTERVAL_WITHOUT_KEY,
+    SCIHUB_MIRRORS,
+    SCIHUB_TIMEOUT_SECONDS,
 )
 from .models import BibEntry
 from .utils import make_paper_id, normalize_arxiv_id, normalize_doi, normalize_title
@@ -45,7 +47,7 @@ from .utils import make_paper_id, normalize_arxiv_id, normalize_doi, normalize_t
 logger = logging.getLogger(__name__)
 
 S2_BASE = "https://api.semanticscholar.org/graph/v1"
-S2_FIELDS = "paperId,title,authors,year,abstract,externalIds,openAccessPdf"
+S2_FIELDS = "paperId,title,authors,year,abstract,externalIds,openAccessPdf,citationCount"
 
 #: Fields we ask S2 to return for each citing paper in a reverse trace.
 #: `contexts` are the 1-2 sentence snippets around the citation — the
@@ -89,6 +91,7 @@ class ResolvedRef:
     arxiv_id: str | None = None
     openreview_id: str | None = None
     abstract: str | None = None
+    citation_count: int | None = None
     pdf_path: Path | None = None
     url: str | None = None
 
@@ -99,6 +102,9 @@ class ReferenceResolver:
         cache_dir: str | Path = "./cache",
         s2_api_key: str | None = None,
         s2_min_interval: float | None = None,
+        supplied_pdfs: dict[str, Path] | None = None,
+        enrich: bool = False,
+        email: str | None = None,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.pdf_dir = self.cache_dir / "pdfs"
@@ -137,6 +143,13 @@ class ReferenceResolver:
             delay_seconds=ARXIV_MIN_INTERVAL,
             num_retries=ARXIV_NUM_RETRIES,
         )
+        self.supplied_pdfs = supplied_pdfs or {}
+        self._enricher = None
+        if enrich or email:
+            from .metadata_enrichment import MetadataEnricher
+            self._enricher = MetadataEnricher(
+                self.meta_cache, email=email,
+            )
 
     # ---------- circuit breakers ----------
 
@@ -228,6 +241,26 @@ class ReferenceResolver:
                     if v and not meta.get(k):
                         meta[k] = v
 
+        # 4. Metadata enrichment via OpenAlex (if enabled)
+        if self._enricher:
+            needs = (
+                not meta.get("abstract")
+                or not meta.get("citation_count")
+                or not meta.get("open_access_url")
+            )
+            if needs and meta.get("doi"):
+                enriched = self._enricher.enrich_by_doi(meta["doi"])
+                if enriched:
+                    for k, v in enriched.items():
+                        if v and not meta.get(k):
+                            meta[k] = v
+            if needs and not meta.get("doi") and meta.get("title"):
+                enriched = self._enricher.enrich_by_title(meta["title"])
+                if enriched:
+                    for k, v in enriched.items():
+                        if v and not meta.get(k):
+                            meta[k] = v
+
         paper_id = make_paper_id(
             doi=meta.get("doi"),
             arxiv_id=meta.get("arxiv_id"),
@@ -238,11 +271,36 @@ class ReferenceResolver:
         if paper_id.startswith("title:") and meta.get("openreview_id"):
             paper_id = f"openreview:{meta['openreview_id']}"
 
+        # --- PDF download cascade ---
         pdf_path = None
-        if meta.get("arxiv_id"):
+
+        # 0. User-supplied PDF (highest priority)
+        if paper_id in self.supplied_pdfs:
+            pdf_path = self.supplied_pdfs[paper_id]
+
+        # 1. arXiv
+        if pdf_path is None and meta.get("arxiv_id"):
             pdf_path = self._download_arxiv(meta["arxiv_id"])
+
+        # 2. OpenReview
         if pdf_path is None and meta.get("openreview_id"):
             pdf_path = self._download_openreview(meta["openreview_id"])
+
+        # 3. Sci-Hub (by DOI)
+        if pdf_path is None and meta.get("doi"):
+            pdf_path = self._download_scihub(meta["doi"])
+
+        # 4. S2 open-access PDF URL
+        if pdf_path is None and meta.get("open_access_url"):
+            pdf_path = self._download_generic_pdf(
+                meta["open_access_url"], paper_id,
+            )
+
+        # 5. Preprint-specific download
+        if pdf_path is None and meta.get("doi"):
+            pdf_path = self._try_preprint_download(
+                meta["doi"], meta.get("open_access_url"), paper_id,
+            )
 
         url = None
         if meta.get("arxiv_id"):
@@ -261,6 +319,7 @@ class ReferenceResolver:
             arxiv_id=meta.get("arxiv_id"),
             openreview_id=meta.get("openreview_id"),
             abstract=meta.get("abstract"),
+            citation_count=meta.get("citation_count"),
             pdf_path=pdf_path,
             url=url,
         )
@@ -446,6 +505,7 @@ class ReferenceResolver:
 
     def _normalize_s2(self, paper: S2Paper) -> NormalizedMeta:
         ext = paper.get("externalIds") or {}
+        oa = paper.get("openAccessPdf")
         return {
             "title": paper.get("title"),
             "authors": [
@@ -457,6 +517,8 @@ class ReferenceResolver:
             "abstract": paper.get("abstract"),
             "doi": normalize_doi(ext.get("DOI")),
             "arxiv_id": normalize_arxiv_id(ext.get("ArXiv")),
+            "citation_count": paper.get("citationCount"),
+            "open_access_url": oa.get("url") if oa else None,
         }
 
     # ---------- Citations (reverse trace) ----------
@@ -590,6 +652,122 @@ class ReferenceResolver:
         out.write_bytes(r.content)
         logger.info("Downloaded openreview:%s -> %s", openreview_id, out.name)
         return out
+
+    # ---------- Sci-Hub download ----------
+
+    def _download_scihub(self, doi: str) -> Path | None:
+        """Try to download a paper from Sci-Hub mirrors by DOI."""
+        safe = re.sub(r"[^\w\-.]", "_", doi)[:100]
+        out = self.pdf_dir / f"scihub_{safe}.pdf"
+        if out.exists() and out.stat().st_size > 0:
+            return out
+
+        for mirror in SCIHUB_MIRRORS:
+            try:
+                page_url = f"{mirror}/{doi}"
+                r = requests.get(
+                    page_url,
+                    headers={"User-Agent": BROWSER_UA},
+                    timeout=SCIHUB_TIMEOUT_SECONDS,
+                    allow_redirects=True,
+                )
+            except Exception as e:
+                logger.debug("Sci-Hub %s failed for %s: %s", mirror, doi, e)
+                continue
+            if r.status_code != 200:
+                logger.debug("Sci-Hub %s -> HTTP %s for %s", mirror, r.status_code, doi)
+                continue
+
+            pdf_url = self._extract_scihub_pdf_url(r.text, mirror)
+            if not pdf_url:
+                logger.debug("Sci-Hub %s: no PDF URL found for %s", mirror, doi)
+                continue
+
+            try:
+                pr = requests.get(
+                    pdf_url,
+                    headers={"User-Agent": BROWSER_UA},
+                    timeout=SCIHUB_TIMEOUT_SECONDS,
+                    allow_redirects=True,
+                )
+            except Exception as e:
+                logger.debug("Sci-Hub PDF download failed from %s: %s", pdf_url, e)
+                continue
+            if pr.status_code == 200 and pr.content.startswith(b"%PDF"):
+                out.write_bytes(pr.content)
+                logger.info("Downloaded via Sci-Hub: %s -> %s", doi, out.name)
+                return out
+            logger.debug("Sci-Hub PDF bad response from %s (HTTP %s)", pdf_url, pr.status_code)
+
+        return None
+
+    @staticmethod
+    def _extract_scihub_pdf_url(html: str, mirror: str) -> str | None:
+        """Extract the PDF URL from a Sci-Hub HTML page.
+
+        Looks for <embed type="application/pdf" src="..."> or a save
+        button with onclick="location.href='...'".
+        """
+        # Try <embed> tag first
+        m = re.search(r'<embed[^>]+type="application/pdf"[^>]+src="([^"]+)"', html)
+        if not m:
+            m = re.search(r'<embed[^>]+src="([^"]+)"[^>]+type="application/pdf"', html)
+        if m:
+            url = m.group(1)
+            if url.startswith("//"):
+                url = "https:" + url
+            elif url.startswith("/"):
+                url = mirror.rstrip("/") + url
+            return url
+
+        # Try save button onclick
+        m = re.search(r"location\.href='([^']+\.pdf[^']*)'", html)
+        if m:
+            url = m.group(1).replace("\\/", "/")
+            if url.startswith("//"):
+                url = "https:" + url
+            elif url.startswith("/"):
+                url = mirror.rstrip("/") + url
+            return url
+
+        return None
+
+    # ---------- generic PDF download ----------
+
+    def _download_generic_pdf(self, url: str, paper_id: str) -> Path | None:
+        """Download a PDF from an arbitrary URL (e.g. S2 open-access link)."""
+        safe = re.sub(r"[^\w\-.]", "_", paper_id)[:100]
+        out = self.pdf_dir / f"oa_{safe}.pdf"
+        if out.exists() and out.stat().st_size > 0:
+            return out
+        try:
+            r = requests.get(
+                url,
+                headers={"User-Agent": BROWSER_UA},
+                timeout=PDF_DOWNLOAD_TIMEOUT_SECONDS,
+                allow_redirects=True,
+            )
+        except Exception as e:
+            logger.warning("Generic PDF download failed for %s: %s", url, e)
+            return None
+        if r.status_code != 200 or not r.content.startswith(b"%PDF"):
+            logger.debug("Generic PDF bad response from %s (HTTP %s)", url, r.status_code)
+            return None
+        out.write_bytes(r.content)
+        logger.info("Downloaded OA PDF: %s -> %s", url[:80], out.name)
+        return out
+
+    # ---------- preprint download ----------
+
+    def _try_preprint_download(
+        self, doi: str, oa_url: str | None, paper_id: str,
+    ) -> Path | None:
+        """Try to download a PDF from a preprint server based on the DOI."""
+        from .preprint_resolver import build_preprint_pdf_url
+        pdf_url = build_preprint_pdf_url(doi, oa_url)
+        if pdf_url:
+            return self._download_generic_pdf(pdf_url, paper_id)
+        return None
 
     # ---------- arxiv download ----------
 

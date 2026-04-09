@@ -222,6 +222,7 @@ def _node_payload(node: PaperNode) -> dict:
         "doi": node.doi,
         "arxiv_id": node.arxiv_id,
         "abstract": node.abstract,
+        "citation_count": node.citation_count,
         "keyword_hits": node.keyword_hits,
     }
 

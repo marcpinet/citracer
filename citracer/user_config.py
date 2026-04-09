@@ -86,6 +86,28 @@ def set_s2_api_key(key: str) -> Path:
     return save_config(data)
 
 
+def get_email() -> str | None:
+    """Return the OpenAlex email from the user config, if any."""
+    return load_config().get("email")
+
+
+def set_email(email: str) -> Path:
+    """Persist the OpenAlex email. Returns the config file path."""
+    data = load_config()
+    data["email"] = email
+    return save_config(data)
+
+
+def clear_email() -> bool:
+    """Remove the email from the user config."""
+    data = load_config()
+    if "email" not in data:
+        return False
+    del data["email"]
+    save_config(data)
+    return True
+
+
 def clear_s2_api_key() -> bool:
     """Remove the Semantic Scholar API key from the user config.
 

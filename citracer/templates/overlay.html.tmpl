@@ -707,6 +707,7 @@
     html += '<div class="meta">';
     if (authors) html += escapeHtml(authors) + '<br>';
     if (d.year) html += 'Year: ' + d.year + ' &middot; ';
+    if (d.citation_count != null) html += 'Citations: ' + d.citation_count + ' &middot; ';
     html += 'Status: <b>' + escapeHtml(d.status) + '</b> &middot; depth ' + d.depth;
     html += '</div>';
     if (d.url) {

@@ -114,6 +114,29 @@ def build_parser() -> argparse.ArgumentParser:
              "the standard GraphML (Gephi, networkx, yEd). Repeat to "
              "export multiple formats in one run.",
     )
+    p.add_argument(
+        "--enrich",
+        action="store_true",
+        help="Enable metadata enrichment via OpenAlex for unavailable nodes "
+             "(adds abstract, citation count, year). Anonymous mode (slower); "
+             "combine with --email for 10x faster lookups.",
+    )
+    p.add_argument(
+        "--email",
+        default=None,
+        help="Email for OpenAlex polite pool (10 req/s vs 1 req/s anonymous). "
+             "Implies --enrich. Can also be set via OPENALEX_EMAIL env var or "
+             "'citracer config set-email <email>'.",
+    )
+    p.add_argument(
+        "--supply-pdf",
+        action="append",
+        default=[],
+        metavar="ID=PATH",
+        help="Supply a local PDF for a paper node. ID is the paper_id from a "
+             "previous graph export (e.g. 'doi:10.1234/foo=paper.pdf'). "
+             "Repeat for multiple papers.",
+    )
     p.add_argument("--no-open", action="store_true", help="Do not open the result in a browser.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
@@ -193,8 +216,38 @@ def main(argv: list[str] | None = None) -> int:
             "Once you have a key, run: citracer config set-s2-key <key>"
         )
 
+    # Parse --supply-pdf specs
+    supplied_pdfs: dict[str, Path] = {}
+    for spec in args.supply_pdf:
+        if "=" not in spec:
+            logger.error("--supply-pdf must be ID=PATH, got: %s", spec)
+            return 2
+        pid, ppath = spec.split("=", 1)
+        p = Path(ppath).expanduser()
+        if not p.exists():
+            logger.error("Supplied PDF not found: %s", p)
+            return 2
+        supplied_pdfs[pid.strip()] = p
+    if supplied_pdfs:
+        logger.info("User-supplied PDFs for %d node(s)", len(supplied_pdfs))
+
+    # Resolve email for OpenAlex enrichment
+    email = (
+        args.email
+        or os.environ.get("OPENALEX_EMAIL")
+        or user_config.get_email()
+        or None
+    )
+    enrich = args.enrich or bool(email)
+
     # Resolve the root source into a local PDF path (download if needed).
-    resolver = ReferenceResolver(cache_dir=args.cache_dir, s2_api_key=s2_key)
+    resolver = ReferenceResolver(
+        cache_dir=args.cache_dir,
+        s2_api_key=s2_key,
+        supplied_pdfs=supplied_pdfs,
+        enrich=enrich,
+        email=email,
+    )
     try:
         pdf = resolve_source(
             pdf=args.pdf,
@@ -345,6 +398,21 @@ def _handle_config(argv: list[str]) -> int:
         "clear-s2-key",
         help="Remove the saved Semantic Scholar API key.",
     )
+
+    p_email = sub.add_parser(
+        "set-email",
+        help="Save an email for OpenAlex polite pool (10x faster enrichment).",
+    )
+    p_email.add_argument("email", help="Your email address.")
+    sub.add_parser(
+        "get-email",
+        help="Print the saved email.",
+    )
+    sub.add_parser(
+        "clear-email",
+        help="Remove the saved email.",
+    )
+
     sub.add_parser(
         "path",
         help="Print the absolute path to the config file.",
@@ -388,6 +456,27 @@ def _handle_config(argv: list[str]) -> int:
             logger.info("Cleared Semantic Scholar API key from user config.")
         else:
             logger.info("No Semantic Scholar API key was set.")
+        return 0
+
+    if args.action == "set-email":
+        path = user_config.set_email(args.email.strip())
+        logger.info("Saved email to %s", path)
+        return 0
+
+    if args.action == "get-email":
+        email = user_config.get_email()
+        if email is None:
+            logger.info("No email saved.")
+            return 1
+        logger.info("Email: %s", email)
+        return 0
+
+    if args.action == "clear-email":
+        removed = user_config.clear_email()
+        if removed:
+            logger.info("Cleared email from user config.")
+        else:
+            logger.info("No email was set.")
         return 0
 
     if args.action == "path":
