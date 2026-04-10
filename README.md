@@ -107,6 +107,11 @@ citracer --pdf paper.pdf --keyword "attention" --supply-pdf "doi:10.1234/foo=~/p
 
 # Export the graph for downstream analysis
 citracer --pdf paper.pdf --keyword "..." --export out/graph.json --export out/graph.graphml
+
+# Diff against a previous trace to highlight new papers (orange nodes)
+citracer --pdf paper.pdf --keyword "attention" --diff output/old_graph.json
+citracer --pdf paper.pdf --keyword "attention" --diff output/old_graph.json --since 2025
+citracer --pdf paper.pdf --keyword "attention" --since 2025-06
 ```
 
 ### Source (exactly one required)
@@ -135,6 +140,8 @@ citracer --pdf paper.pdf --keyword "..." --export out/graph.json --export out/gr
 | `--enrich` | off | Enable metadata enrichment via [OpenAlex](https://openalex.org/) for nodes missing abstract, citation count, or year. Anonymous mode (1 req/s); combine with `--email` for 10x faster lookups |
 | `--email` | none | Email for OpenAlex polite pool (10 req/s). Implies `--enrich`. Can also be set via `OPENALEX_EMAIL` env var or `citracer config set-email` |
 | `--supply-pdf` | none | Supply a local PDF for a specific node. Format: `ID=PATH` where ID is the `paper_id` from a previous graph export (e.g. `doi:10.1234/foo=paper.pdf`). Repeat for multiple papers |
+| `--diff` | none | Compare against a previous citracer JSON export and highlight new nodes (papers not in the baseline) in orange. Useful for monitoring how a citation graph evolves over time |
+| `--since` | none | Highlight nodes published on or after this date (`YYYY` or `YYYY-MM`). Works alone (date filter) or with `--diff` (intersection: new AND recent). Uses S2 `publicationDate` for month precision when available, falls back to year |
 
 ### Output
 
@@ -157,6 +164,7 @@ Nodes are colored by status:
 | green | `analyzed` | PDF retrieved and the keyword was found in its text |
 | gray | `analyzed (no match)` | PDF retrieved and parsed, but the keyword does not appear |
 | red | `unavailable` | PDF could not be retrieved |
+| orange | `new` | Paper not present in the `--diff` baseline and/or published after the `--since` date. Only appears when `--diff` or `--since` is used |
 
 Edges come in two flavors:
 
@@ -174,7 +182,8 @@ A control panel in the top-left corner of the graph lets you tune the view on th
 | **layout** | Sugiyama (by year) *(default)*<br>Sugiyama (by depth)<br>Force-directed (BarnesHut)<br>Fruchterman-Reingold (approx) | Switches the layout algorithm. Sugiyama-by-year places the oldest papers at the top, making it easy to spot which paper first introduced the concept |
 | **node size** | in-graph citations *(default)*<br>keyword hits<br>PageRank<br>betweenness | `in-graph citations` scales node size with the number of incoming edges visible in the graph. `keyword hits` scales by the count of keyword occurrences. `PageRank` and `betweenness` use the corresponding centrality metric computed on the citation graph |
 | **spread** | slider (0.3× to 3.0×) | Rescales all node positions from the graph's centroid, stretching or compressing the layout without deforming it. Works with any layout mode |
-| **nodes (legend)** | click rows to toggle | Hide/show nodes by status |
+| **curved edges** | checkbox *(on by default)* | Toggle between curved (cubicBezier/curvedCW) and straight edge rendering |
+| **nodes (legend)** | click rows to toggle | Hide/show nodes by status. When `--diff` or `--since` is used, an orange **new** row appears to toggle new papers |
 | **edges (legend)** | click rows to toggle | Hide/show edges by type (keyword-associated vs. bibliographic link) |
 
 Other interactive features:
@@ -256,6 +265,28 @@ For a paper with 2000+ citations, this runs in ~10-30 seconds and typically surf
 
 Caveats: reverse trace depends entirely on S2 being reachable and having indexed the citation contexts (they come from S2's own PDF processing pipeline). Papers S2 doesn't know about won't appear. The resulting graph has no cross-graph bibliographic links because we never parse the citing papers' bibliographies.
 
+### Literature monitoring (`--diff` / `--since`)
+
+Citracer can compare a new trace against a previous one to highlight what changed. This turns a one-shot snapshot into a monitoring workflow:
+
+```bash
+# Initial trace — export a baseline
+citracer --pdf paper.pdf --keyword "attention" --depth 3 --export baseline.json
+
+# Months later — re-run the same trace and diff
+citracer --pdf paper.pdf --keyword "attention" --depth 3 --diff baseline.json
+```
+
+Nodes that weren't in `baseline.json` are colored **orange** and labeled `NEW` in the info panel. Their original status (analyzed, no match, unavailable) is preserved — the orange overlay is purely visual. The legend gains a clickable **new (since last run)** row to toggle them on/off.
+
+`--since YYYY` or `--since YYYY-MM` highlights nodes published on or after a date. When combined with `--diff`, both conditions must be met (intersection): the paper must be absent from the baseline **and** published after the given date.
+
+Month-level precision uses the `publicationDate` field from Semantic Scholar (`YYYY-MM-DD`) when available. When only the publication year is known, `--since 2024-06` falls back to a year-only comparison (`year >= 2024`). Nodes with no known date are skipped and a warning is logged.
+
+Both `is_new` flags (on nodes and edges) are included in JSON and GraphML exports, so downstream scripts can consume the diff without re-running citracer.
+
+**Known limitation:** `paper_id` is not fully stable across runs. If a paper was resolved by title hash in one run and by DOI in another, it may falsely appear as "new". Re-running both traces from the same cache directory minimizes this.
+
 ## 📁 Project structure
 
 ```
@@ -270,6 +301,7 @@ citracer/
 ├── metadata_cache.py       # SQLite-backed key/value store for resolver metadata, thread-safe
 ├── analytics.py            # bibliometric metrics: PageRank, betweenness, pivot detection, timeline
 ├── cross_citation.py       # post-trace pass that adds dashed bibliographic-only edges between graph nodes
+├── diff.py                 # --diff / --since: compare against a previous trace, mark new nodes/edges
 ├── tracer.py               # BFS recursion with parallel parsing, deduplication, year anchoring
 ├── visualizer.py           # pyvis rendering pipeline
 ├── exporter.py             # GraphML / JSON export (includes analytics and manifest)
