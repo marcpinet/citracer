@@ -44,6 +44,7 @@ class KeywordHit:
     match_end: int
     ref_keys: list[str]     # bib keys of references within the context window
     keyword: str = ""       # which keyword produced this hit (multi-keyword mode)
+    match_type: str = "regex"  # "regex" or "semantic"
 
 
 @dataclass
@@ -58,6 +59,9 @@ class PaperNode:
     abstract: str | None = None
     citation_count: int | None = None
     keyword_hits: list[str] = field(default_factory=list)
+    # Parallel list: match_type for each keyword_hit ("regex" or "semantic").
+    # Only used by the visualizer for the SEM badge; not exported to JSON/GraphML.
+    keyword_hit_types: list[str] = field(default_factory=list, repr=False)
     status: str = "pending"  # "analyzed" | "unavailable" | "no_match" | "root"
     depth: int = 0
     is_new: bool = False     # set by --diff / --since, rendering overlay only

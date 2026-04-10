@@ -157,6 +157,29 @@ def build_parser() -> argparse.ArgumentParser:
              "(intersection: new AND recent). Uses S2 publicationDate "
              "for month precision when available, falls back to year.",
     )
+    p.add_argument(
+        "--semantic",
+        action="store_true",
+        help="Enable semantic matching: after the regex pass, scan remaining "
+             "sentences with a sentence-transformer embedding model to catch "
+             "conceptual matches the keyword regex missed. "
+             "Requires: pip install citracer[semantic]",
+    )
+    p.add_argument(
+        "--semantic-model",
+        default=None,
+        metavar="NAME",
+        help="Sentence-transformer model for --semantic "
+             "(default: all-MiniLM-L6-v2). Implies --semantic.",
+    )
+    p.add_argument(
+        "--semantic-threshold",
+        type=float,
+        default=None,
+        metavar="T",
+        help="Cosine similarity threshold for semantic matching "
+             "(default: 0.45, range 0.0-1.0). Implies --semantic.",
+    )
     p.add_argument("--no-open", action="store_true", help="Do not open the result in a browser.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
@@ -291,6 +314,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         depth = args.depth
 
+    # --semantic-model and --semantic-threshold imply --semantic
+    use_semantic = args.semantic or args.semantic_model is not None or args.semantic_threshold is not None
+    if use_semantic and args.reverse:
+        logger.warning("--semantic is not supported in reverse trace mode (ignored)")
+        use_semantic = False
+
     if args.reverse:
         # Reverse trace: we need the root paper's S2-compatible id and
         # enough metadata for the root node, but we don't need the
@@ -365,6 +394,9 @@ def main(argv: list[str] | None = None) -> int:
             supplied_pdfs=supplied_pdfs or None,
             enrich=enrich,
             email=email,
+            use_semantic=use_semantic,
+            semantic_model=args.semantic_model,
+            semantic_threshold=args.semantic_threshold,
         )
 
     logger.info("Graph: %d nodes, %d edges", len(graph.nodes), len(graph.edges))

@@ -232,6 +232,7 @@ def _node_payload(node: PaperNode) -> dict:
         "abstract": node.abstract,
         "citation_count": node.citation_count,
         "keyword_hits": node.keyword_hits,
+        "keyword_hit_types": node.keyword_hit_types,
         "is_new": node.is_new,
     }
 
