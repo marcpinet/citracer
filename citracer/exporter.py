@@ -73,6 +73,7 @@ def _export_json(
             "title": n.title,
             "authors": n.authors,
             "year": n.year,
+            "publication_date": n.publication_date,
             "status": n.status,
             "depth": n.depth,
             "doi": n.doi,
@@ -81,6 +82,7 @@ def _export_json(
             "citation_count": n.citation_count,
             "url": n.url,
             "keyword_hits": n.keyword_hits,
+            "is_new": n.is_new,
         }
         for n in graph.nodes.values()
     ]
@@ -91,6 +93,7 @@ def _export_json(
             "type": e.edge_type,
             "depth": e.depth,
             "context": e.context,
+            "is_new": e.is_new,
         }
         for e in graph.edges
     ]
@@ -114,6 +117,8 @@ _GRAPHML_KEYS = [
     ("citation_count", "node", "citation_count", "int"),
     ("url",          "node", "url",          "string"),
     ("keyword_hits", "node", "keyword_hits", "int"),
+    ("publication_date", "node", "publication_date", "string"),
+    ("is_new",       "node", "is_new",       "boolean"),
     ("betweenness",  "node", "betweenness",  "double"),
     ("pagerank",     "node", "pagerank",     "double"),
     ("is_pivot",     "node", "is_pivot",     "boolean"),
@@ -121,6 +126,7 @@ _GRAPHML_KEYS = [
     ("edge_type",    "edge", "edge_type",    "string"),
     ("edge_depth",   "edge", "depth",        "int"),
     ("context",      "edge", "context",      "string"),
+    ("edge_is_new",  "edge", "is_new",       "boolean"),
 ]
 
 
@@ -155,6 +161,9 @@ def _export_graphml(graph: TracerGraph, out: Path, analytics: dict | None = None
         _data(lines, "citation_count", n.citation_count)
         _data(lines, "url", n.url)
         _data(lines, "keyword_hits", len(n.keyword_hits))
+        _data(lines, "publication_date", n.publication_date)
+        if n.is_new:
+            _data(lines, "is_new", n.is_new)
         if analytics:
             nm = analytics.get("node_metrics", {}).get(n.paper_id, {})
             _data(lines, "betweenness", nm.get("betweenness"))
@@ -171,6 +180,8 @@ def _export_graphml(graph: TracerGraph, out: Path, analytics: dict | None = None
         _data(lines, "edge_type", e.edge_type)
         _data(lines, "edge_depth", e.depth)
         _data(lines, "context", e.context)
+        if e.is_new:
+            _data(lines, "edge_is_new", e.is_new)
         lines.append("    </edge>")
 
     lines.append("  </graph>")

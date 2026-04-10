@@ -47,7 +47,7 @@ from .utils import make_paper_id, normalize_arxiv_id, normalize_doi, normalize_t
 logger = logging.getLogger(__name__)
 
 S2_BASE = "https://api.semanticscholar.org/graph/v1"
-S2_FIELDS = "paperId,title,authors,year,abstract,externalIds,openAccessPdf,citationCount"
+S2_FIELDS = "paperId,title,authors,year,publicationDate,abstract,externalIds,openAccessPdf,citationCount"
 
 #: Fields we ask S2 to return for each citing paper in a reverse trace.
 #: `contexts` are the 1-2 sentence snippets around the citation — the
@@ -87,6 +87,7 @@ class ResolvedRef:
     title: str
     authors: list[str] = field(default_factory=list)
     year: int | None = None
+    publication_date: str | None = None
     doi: str | None = None
     arxiv_id: str | None = None
     openreview_id: str | None = None
@@ -319,6 +320,7 @@ class ReferenceResolver:
             title=meta.get("title") or bib.raw[:120] or "(unknown)",
             authors=meta.get("authors") or bib.authors,
             year=meta.get("year") or bib.year,
+            publication_date=meta.get("publication_date"),
             doi=meta.get("doi"),
             arxiv_id=meta.get("arxiv_id"),
             openreview_id=meta.get("openreview_id"),
@@ -545,6 +547,7 @@ class ReferenceResolver:
                 if a.get("name")
             ],
             "year": paper.get("year"),
+            "publication_date": paper.get("publicationDate"),
             "abstract": paper.get("abstract"),
             "doi": normalize_doi(ext.get("DOI")),
             "arxiv_id": normalize_arxiv_id(ext.get("ArXiv")),

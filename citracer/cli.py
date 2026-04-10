@@ -138,6 +138,25 @@ def build_parser() -> argparse.ArgumentParser:
              "previous graph export (e.g. 'doi:10.1234/foo=paper.pdf'). "
              "Repeat for multiple papers.",
     )
+    p.add_argument(
+        "--diff",
+        default=None,
+        metavar="PATH",
+        help="Compare against a previous citracer JSON export and highlight "
+             "new nodes (papers not in the baseline) in orange. Note: if "
+             "the same paper was resolved by title hash in one run and by "
+             "DOI in another, it may appear as new. Re-running both traces "
+             "from the same cache minimizes this.",
+    )
+    p.add_argument(
+        "--since",
+        default=None,
+        metavar="YYYY[-MM]",
+        help="Highlight nodes published on or after this date. Accepts "
+             "YYYY or YYYY-MM. Works alone (date filter) or with --diff "
+             "(intersection: new AND recent). Uses S2 publicationDate "
+             "for month precision when available, falls back to year.",
+    )
     p.add_argument("--no-open", action="store_true", help="Do not open the result in a browser.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
@@ -350,6 +369,39 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("Graph: %d nodes, %d edges", len(graph.nodes), len(graph.edges))
 
+    # Apply diff / --since highlighting (before analytics, so status is untouched)
+    diff_mode = bool(args.diff or args.since)
+    if diff_mode:
+        from .diff import apply_diff, load_baseline, parse_since
+
+        baseline_node_ids = None
+        baseline_edge_keys = None
+        if args.diff:
+            try:
+                baseline_node_ids, baseline_edge_keys = load_baseline(args.diff)
+                logger.info("Loaded baseline with %d node(s) from %s",
+                            len(baseline_node_ids), args.diff)
+            except (FileNotFoundError, ValueError) as e:
+                logger.error("--diff failed: %s", e)
+                return 2
+        if args.since:
+            try:
+                parse_since(args.since)  # validate early
+            except ValueError as e:
+                logger.error("--since: %s", e)
+                return 2
+
+        diff_result = apply_diff(
+            graph,
+            baseline_node_ids=baseline_node_ids,
+            baseline_edge_keys=baseline_edge_keys,
+            since=args.since,
+        )
+        logger.info(
+            "Diff: %d new node(s), %d new edge(s)",
+            diff_result.n_new_nodes, diff_result.n_new_edges,
+        )
+
     # Compute bibliometric analytics
     analytics_data = analytics.analyze(graph)
     n_pivots = len(analytics_data.get("pivot_papers", []))
@@ -390,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
         show_details=args.details,
         default_layout=default_layout,
         analytics=analytics_data,
+        diff_mode=diff_mode,
     )
     logger.info("Wrote %s", out_path)
 
