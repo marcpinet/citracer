@@ -52,6 +52,7 @@ class PaperNode:
     title: str
     authors: list[str] = field(default_factory=list)
     year: int | None = None
+    publication_date: str | None = None  # YYYY-MM-DD from S2, finer than year
     arxiv_id: str | None = None
     doi: str | None = None
     abstract: str | None = None
@@ -59,6 +60,7 @@ class PaperNode:
     keyword_hits: list[str] = field(default_factory=list)
     status: str = "pending"  # "analyzed" | "unavailable" | "no_match" | "root"
     depth: int = 0
+    is_new: bool = False     # set by --diff / --since, rendering overlay only
     url: str | None = None
     # Populated only for nodes we actually parsed (root + analyzed + no_match).
     # Used to discover cross-graph citations when --show-all-citations is on.
@@ -80,6 +82,7 @@ class CitationEdge:
     # "secondary" = bibliographic-only link between two graph nodes, added
     #               when --show-all-citations is set (rendered dashed)
     edge_type: str = "primary"
+    is_new: bool = False  # set by --diff, rendering overlay only
 
 
 @dataclass

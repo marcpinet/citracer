@@ -55,6 +55,7 @@ class NormalizedMeta(TypedDict, total=False):
     title: str | None
     authors: list[str]
     year: int | None
+    publication_date: str | None  # YYYY-MM-DD from S2
     abstract: str | None
     doi: str | None
     arxiv_id: str | None

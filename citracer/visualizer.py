@@ -36,6 +36,7 @@ STATUS_COLORS = {
     "no_match":    {"background": "#9e9e9e", "border": "#5a5a5a"},
     "unavailable": {"background": "#d62728", "border": "#7a1313"},
     "pending":     {"background": "#cccccc", "border": "#888888"},
+    "new":         {"background": "#ff8c00", "border": "#b35c00"},
 }
 
 
@@ -46,6 +47,7 @@ def render(
     show_details: bool = False,
     default_layout: str = "sugiyama-year",
     analytics: dict | None = None,
+    diff_mode: bool = False,
 ) -> Path:
     # Normalize: always work with a list of keywords internally.
     keywords: list[str] = [keyword] if isinstance(keyword, str) else list(keyword)
@@ -74,7 +76,10 @@ def render(
     node_details: dict[str, dict] = {}
 
     for node in graph.nodes.values():
-        color = STATUS_COLORS.get(node.status, STATUS_COLORS["pending"])
+        if node.is_new:
+            color = STATUS_COLORS["new"]
+        else:
+            color = STATUS_COLORS.get(node.status, STATUS_COLORS["pending"])
         label = _short_label(node)
         payload = _node_payload(node)
         payload["depth_level"] = node.depth
@@ -160,7 +165,7 @@ def render(
 
     net.write_html(str(output), notebook=False, open_browser=False)
     _fix_pyvis_html(output)
-    _inject_overlay(output, keywords, graph, node_details, has_secondary_edges, default_layout, analytics)
+    _inject_overlay(output, keywords, graph, node_details, has_secondary_edges, default_layout, analytics, diff_mode)
     return output
 
 
@@ -227,6 +232,7 @@ def _node_payload(node: PaperNode) -> dict:
         "abstract": node.abstract,
         "citation_count": node.citation_count,
         "keyword_hits": node.keyword_hits,
+        "is_new": node.is_new,
     }
 
 
@@ -263,6 +269,7 @@ def _inject_overlay(
     has_secondary_edges: bool = False,
     default_layout: str = "sugiyama-year",
     analytics: dict | None = None,
+    diff_mode: bool = False,
 ) -> None:
     """Inject the control panel, legend, and side info panel into the pyvis
     HTML output. The template lives in templates/overlay.html.tmpl and uses
@@ -276,12 +283,15 @@ def _inject_overlay(
     default_disabled: list[str] = []
 
     legend_rows = []
-    for status, label in [
+    status_list = [
         ("root", "root"),
         ("analyzed", "analyzed (keyword found)"),
         ("no_match", "analyzed (no match)"),
         ("unavailable", "unavailable"),
-    ]:
+    ]
+    if diff_mode:
+        status_list.append(("new", "new (since last run)"))
+    for status, label in status_list:
         bg = STATUS_COLORS[status]["background"]
         cls = "legend-item disabled" if status in default_disabled else "legend-item"
         legend_rows.append(

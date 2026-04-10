@@ -467,7 +467,8 @@
     const nodeUpdates = [];
     nodes.forEach(n => {
       const d = NODE_DETAILS[n.id];
-      const statusHidden = !!(d && disabledStatus.has(d.status));
+      const effectiveStatus = (d && d.is_new) ? "new" : (d ? d.status : "pending");
+      const statusHidden = disabledStatus.has(effectiveStatus);
       const manualHidden = manuallyHidden.has(n.id);
       const hidden = statusHidden || manualHidden;
       nodeHidden[n.id] = hidden;
@@ -750,7 +751,9 @@
     if (authors) html += escapeHtml(authors) + '<br>';
     if (d.year) html += 'Year: ' + d.year + ' &middot; ';
     if (d.citation_count != null) html += 'Citations: ' + d.citation_count + ' &middot; ';
-    html += 'Status: <b>' + escapeHtml(d.status) + '</b> &middot; depth ' + d.depth;
+    html += 'Status: <b>' + escapeHtml(d.status) + '</b>';
+    if (d.is_new) html += ' <span style="background:#ff8c00;color:#fff;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:bold;">NEW</span>';
+    html += ' &middot; depth ' + d.depth;
     html += '</div>';
     // Per-node analytics
     const nm = (ANALYTICS.node_metrics || {})[nodeId];
