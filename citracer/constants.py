@@ -33,6 +33,14 @@ GROBID_DEFAULT_WORKERS: int = 4
 #: "independent" -> "independe\\w*" matches "independence", "independently").
 KEYWORD_MORPHO_MIN_LEN: int = 4
 
+#: Default sentence-transformer model for --semantic matching.
+SEMANTIC_DEFAULT_MODEL: str = "all-MiniLM-L6-v2"
+
+#: Cosine similarity threshold for semantic matching. Deliberately
+#: permissive — the regex pass already provides precision, so the
+#: semantic pass is a recall booster. Range: 0.0-1.0.
+SEMANTIC_SIMILARITY_THRESHOLD: float = 0.45
+
 
 # ---------------------------------------------------------------------------
 # Reference resolver (reference_resolver.py)

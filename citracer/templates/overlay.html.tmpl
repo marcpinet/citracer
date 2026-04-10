@@ -779,11 +779,29 @@
     }
     if (d.keyword_hits && d.keyword_hits.length) {
       const expanded = expandedHits.has(nodeId);
-      const visible = expanded ? d.keyword_hits : d.keyword_hits.slice(0, 5);
-      html += '<div class="hits"><b>' + d.keyword_hits.length + ' keyword hit(s)</b>';
-      visible.forEach(h => {
-        html += '<div class="hit-snippet">' + highlightKeyword(h) + '</div>';
-      });
+      const hitTypes = d.keyword_hit_types || [];
+      const nSemantic = hitTypes.filter(t => t === "semantic").length;
+      const nRegex = d.keyword_hits.length - nSemantic;
+      let hitsLabel = d.keyword_hits.length + ' keyword hit(s)';
+      if (nSemantic > 0 && nRegex > 0) {
+        hitsLabel += ' <span style="color:#888;font-weight:normal;">(' + nRegex + ' regex + ' + nSemantic + ' semantic)</span>';
+      } else if (nSemantic > 0) {
+        hitsLabel += ' <span style="color:#888;font-weight:normal;">(semantic)</span>';
+      }
+      const visibleCount = expanded ? d.keyword_hits.length : Math.min(5, d.keyword_hits.length);
+      html += '<div class="hits"><b>' + hitsLabel + '</b>';
+      for (let hi = 0; hi < visibleCount; hi++) {
+        const isSem = hitTypes[hi] === "semantic";
+        if (isSem) {
+          html += '<div class="hit-snippet" style="border-left:3px solid #9c27b0;padding-left:8px;">'
+                + '<span style="background:#9c27b0;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;">SEM</span> '
+                + '<span style="color:#888;font-size:11px;">conceptual match — keyword not literally present</span>'
+                + '<br>' + escapeHtml(d.keyword_hits[hi])
+                + '</div>';
+        } else {
+          html += '<div class="hit-snippet">' + highlightKeyword(d.keyword_hits[hi]) + '</div>';
+        }
+      }
       if (d.keyword_hits.length > 5) {
         if (expanded) {
           html += '<div class="hits-toggle" data-node-id="'

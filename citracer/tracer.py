@@ -85,6 +85,9 @@ def trace(
     supplied_pdfs: dict[str, Path] | None = None,
     enrich: bool = False,
     email: str | None = None,
+    use_semantic: bool = False,
+    semantic_model: str | None = None,
+    semantic_threshold: float | None = None,
 ) -> TracerGraph:
     # Normalize: always work with a list of keywords internally.
     keywords: list[str] = [keyword] if isinstance(keyword, str) else list(keyword)
@@ -202,7 +205,12 @@ def trace(
         hits_by_kw: dict[str, list] = {}
         all_hits = []
         for kw in keywords:
-            kw_hits = keyword_matcher.search(parsed, kw, context_window=context_window)
+            kw_hits = keyword_matcher.search(
+                parsed, kw, context_window=context_window,
+                use_semantic=use_semantic,
+                semantic_model=semantic_model,
+                semantic_threshold=semantic_threshold,
+            )
             for h in kw_hits:
                 h.keyword = kw
             hits_by_kw[kw] = kw_hits
@@ -220,6 +228,7 @@ def trace(
             matched = len(all_hits) > 0
 
         node.keyword_hits = [h.passage for h in all_hits]
+        node.keyword_hit_types = [h.match_type for h in all_hits]
 
         if not matched:
             if node.status != "root":

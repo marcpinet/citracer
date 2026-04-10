@@ -225,3 +225,123 @@ class TestContextForRef:
     def test_not_found(self):
         hits = [KeywordHit(passage="x", match_start=0, match_end=0, ref_keys=["a"])]
         assert context_for_ref(hits, "missing") == ""
+
+
+# ---------------------------------------------------------------------------
+# Semantic matching (mocked — no real model in CI)
+# ---------------------------------------------------------------------------
+
+import numpy as np
+from unittest.mock import patch, MagicMock
+from citracer import keyword_matcher as km_module
+
+
+class _FakeModel:
+    """Stand-in for SentenceTransformer that returns deterministic embeddings.
+
+    Uses a 2D embedding trick: keyword is [1, 0]. A sentence with target
+    cosine similarity `s` gets embedding [s, sqrt(1-s^2)], which after
+    L2 normalization dot-products to exactly `s` with [1, 0].
+    """
+
+    def __init__(self, similarity_map: dict[str, float] | None = None):
+        self._sim_map = similarity_map or {}
+
+    def encode(self, texts: list[str], normalize_embeddings: bool = True):
+        n = len(texts)
+        embs = np.zeros((n, 2), dtype=np.float32)
+        # First text is always the keyword → [1, 0]
+        embs[0] = [1.0, 0.0]
+        for i, t in enumerate(texts):
+            if i == 0:
+                continue
+            sim = 0.0  # default: orthogonal (similarity = 0)
+            for frag, s in self._sim_map.items():
+                if frag.lower() in t.lower():
+                    sim = s
+                    break
+            embs[i] = [sim, np.sqrt(max(0, 1 - sim * sim))]
+        return embs
+
+
+class TestSemanticSearch:
+    def _install_fake_model(self, sim_map):
+        """Install a fake model into the module-level cache."""
+        from citracer.constants import SEMANTIC_DEFAULT_MODEL
+        km_module._semantic_model = _FakeModel(sim_map)
+        km_module._semantic_model_name = SEMANTIC_DEFAULT_MODEL
+
+    def teardown_method(self):
+        km_module._semantic_model = None
+        km_module._semantic_model_name = None
+
+    def test_semantic_disabled_by_default(self):
+        """Without use_semantic=True, only regex runs."""
+        text = "We process each variate independently. Next sentence."
+        p = _parsed(text)
+        hits = search(p, "channel-independent")
+        assert len(hits) == 0  # "variate independently" doesn't match regex
+        assert all(h.match_type == "regex" for h in hits)
+
+    def test_semantic_finds_conceptual_match(self):
+        """Semantic mode catches a sentence the regex would miss."""
+        text = "We process each variate independently. Another sentence here."
+        p = _parsed(text)
+        self._install_fake_model({"variate independently": 0.8})
+        hits = search(p, "channel-independent", use_semantic=True, semantic_threshold=0.5)
+        assert len(hits) == 1
+        assert hits[0].match_type == "semantic"
+        assert "variate independently" in hits[0].passage
+
+    def test_semantic_dedup_with_regex(self):
+        """A sentence matched by regex is NOT re-matched by semantic."""
+        text = "We use channel-independent models here. Another sentence."
+        p = _parsed(text)
+        self._install_fake_model({"channel-independent": 0.95})
+        hits = search(p, "channel-independent", use_semantic=True, semantic_threshold=0.3)
+        # Only 1 hit (regex), not 2
+        assert len(hits) == 1
+        assert hits[0].match_type == "regex"
+
+    def test_semantic_ref_association(self):
+        """Semantic hit includes refs from same + next sentence."""
+        text = "Each variate is processed separately b1. The next sentence b2. Third."
+        refs = [
+            InlineRef(bib_key="b1", start=text.index("b1"), end=text.index("b1") + 2),
+            InlineRef(bib_key="b2", start=text.index("b2"), end=text.index("b2") + 2),
+        ]
+        p = _parsed(text, refs)
+        self._install_fake_model({"variate is processed separately": 0.7})
+        hits = search(p, "channel-independent", use_semantic=True, semantic_threshold=0.5)
+        assert len(hits) == 1
+        # b1 is in same sentence, b2 is in next sentence → both captured
+        assert "b1" in hits[0].ref_keys
+        assert "b2" in hits[0].ref_keys
+
+    def test_semantic_below_threshold_rejected(self):
+        """Low-similarity sentences are not included."""
+        text = "This paper studies weather forecasting. Another sentence."
+        p = _parsed(text)
+        self._install_fake_model({"weather forecasting": 0.2})
+        hits = search(p, "channel-independent", use_semantic=True, semantic_threshold=0.5)
+        assert len(hits) == 0
+
+    def test_semantic_not_available_error(self):
+        """Clear error when sentence-transformers is not installed."""
+        km_module._semantic_model = None
+        km_module._semantic_model_name = None
+        with patch.dict("sys.modules", {"sentence_transformers": None}):
+            text = "Some text here. Another sentence."
+            p = _parsed(text)
+            with pytest.raises(ImportError, match="pip install citracer"):
+                search(p, "test", use_semantic=True)
+
+    def test_semantic_skipped_in_char_window_mode(self):
+        """Semantic mode only works in sentence mode, not char-window mode."""
+        text = "We process each variate independently. Another sentence."
+        p = _parsed(text)
+        self._install_fake_model({"variate independently": 0.8})
+        # context_window=300 forces char-window mode → semantic skipped
+        hits = search(p, "channel-independent", context_window=300,
+                      use_semantic=True, semantic_threshold=0.5)
+        assert len(hits) == 0  # regex doesn't match, semantic skipped

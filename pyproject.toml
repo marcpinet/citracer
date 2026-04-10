@@ -50,6 +50,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+semantic = [
+    "sentence-transformers>=3.0.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-mock>=3.10",
