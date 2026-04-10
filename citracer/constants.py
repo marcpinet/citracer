@@ -123,6 +123,13 @@ OPENALEX_TIMEOUT_SECONDS: float = 15.0
 # Tracer (tracer.py)
 # ---------------------------------------------------------------------------
 
+#: Max plausible gap between two candidate years for the same paper.
+#: GROBID's bibliography parser occasionally produces garbage years (e.g.
+#: it grabs a page number, or the year of a neighbouring citation in the
+#: raw text). We only honour the older candidate when it's within this
+#: window — typical preprint -> final-publication gaps are 0-2 years.
+YEAR_GAP_THRESHOLD: int = 2
+
 #: rapidfuzz threshold used when matching a bibliography entry to an
 #: existing graph node by fuzzy title comparison in the secondary-edge pass.
 CROSS_CITATION_FUZZY_THRESHOLD: int = 88

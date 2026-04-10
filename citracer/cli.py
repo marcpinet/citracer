@@ -342,6 +342,9 @@ def main(argv: list[str] | None = None) -> int:
             grobid_workers=args.grobid_workers,
             consolidate_citations=args.consolidate,
             match_mode=args.match_mode,
+            supplied_pdfs=supplied_pdfs or None,
+            enrich=enrich,
+            email=email,
         )
 
     logger.info("Graph: %d nodes, %d edges", len(graph.nodes), len(graph.edges))

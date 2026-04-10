@@ -57,14 +57,6 @@ The key can be provided in three ways, in order of precedence:
 
    Other config commands: `citracer config show`, `citracer config get-s2-key` (masked), `citracer config clear-s2-key`, `citracer config path`. The file is created with mode `600` on POSIX so other local users can't read it.
 
-An **OpenAlex email** is optional but recommended when using `--enrich`. It activates the [polite pool](https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication) (10 req/s vs 1 req/s anonymous). Set it once via:
-
-   ```bash
-   citracer config set-email your@email.com
-   ```
-
-   Or pass it via `--email` or the `OPENALEX_EMAIL` environment variable.
-
 4. A `.env` file at the project root (copy `.env.example` and fill it in):
 
    ```
@@ -74,6 +66,14 @@ An **OpenAlex email** is optional but recommended when using `--enrich`. It acti
    The `.env` file is git-ignored.
 
 If none of these are set, the unauthenticated public endpoint is used as fallback (much slower, frequent 429 backoffs).
+
+An **OpenAlex email** is optional but recommended when using `--enrich`. It activates the [polite pool](https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication) (10 req/s vs 1 req/s anonymous). Set it once via:
+
+```bash
+citracer config set-email your@email.com
+```
+
+Or pass it via `--email` or the `OPENALEX_EMAIL` environment variable.
 
 ## 🚀 Usage
 

@@ -347,7 +347,7 @@ class ReferenceResolver:
         return meta
 
     def _s2_headers(self) -> dict:
-        h = {"User-Agent": "citracer/0.1"}
+        h = {"User-Agent": "citracer"}
         if self.s2_api_key:
             h["x-api-key"] = self.s2_api_key
         return h
@@ -792,7 +792,7 @@ class ReferenceResolver:
             r = requests.get(
                 url,
                 timeout=PDF_DOWNLOAD_TIMEOUT_SECONDS,
-                headers={"User-Agent": "citracer/0.1"},
+                headers={"User-Agent": "citracer"},
             )
         except Exception as e:
             logger.warning("arxiv download failed for %s: %s", arxiv_id, e)

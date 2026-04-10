@@ -14,14 +14,13 @@ from datetime import date
 
 from rapidfuzz import fuzz
 
-from .constants import CROSS_CITATION_FUZZY_THRESHOLD, CROSS_CITATION_MIN_TITLE_LEN
+from .constants import CROSS_CITATION_FUZZY_THRESHOLD, CROSS_CITATION_MIN_TITLE_LEN, YEAR_GAP_THRESHOLD
 from .models import BibEntry, CitationEdge, PaperNode, TracerGraph
 from .utils import normalize_arxiv_id, normalize_doi, normalize_title
 
 logger = logging.getLogger(__name__)
 
-#: Must match _YEAR_GAP_THRESHOLD in tracer.py — see rationale there.
-_YEAR_GAP_THRESHOLD = 2
+_YEAR_GAP_THRESHOLD = YEAR_GAP_THRESHOLD
 
 
 def _better_year(anchor: int | None, current: int | None, candidate: int | None) -> int | None:

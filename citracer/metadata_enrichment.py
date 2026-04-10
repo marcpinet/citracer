@@ -82,7 +82,7 @@ class MetadataEnricher:
             r = requests.get(
                 url,
                 params=self._params(),
-                headers={"User-Agent": "citracer/0.1"},
+                headers={"User-Agent": "citracer"},
                 timeout=OPENALEX_TIMEOUT_SECONDS,
             )
         except Exception as e:

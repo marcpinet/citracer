@@ -17,7 +17,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from . import keyword_matcher, pdf_parser
-from .constants import GROBID_DEFAULT_WORKERS
+from .constants import GROBID_DEFAULT_WORKERS, YEAR_GAP_THRESHOLD
 from .cross_citation import add_secondary_edges
 from .models import CitationEdge, PaperNode, ParsedPaper, TracerGraph
 from .reference_resolver import ReferenceResolver, ResolvedRef
@@ -82,6 +82,9 @@ def trace(
     grobid_workers: int = GROBID_DEFAULT_WORKERS,
     consolidate_citations: bool = False,
     match_mode: str = "any",
+    supplied_pdfs: dict[str, Path] | None = None,
+    enrich: bool = False,
+    email: str | None = None,
 ) -> TracerGraph:
     # Normalize: always work with a list of keywords internally.
     keywords: list[str] = [keyword] if isinstance(keyword, str) else list(keyword)
@@ -91,7 +94,13 @@ def trace(
         raise ValueError(f"match_mode must be 'any' or 'all', got {match_mode!r}")
 
     graph = TracerGraph()
-    resolver = ReferenceResolver(cache_dir=cache_dir, s2_api_key=s2_api_key)
+    resolver = ReferenceResolver(
+        cache_dir=cache_dir,
+        s2_api_key=s2_api_key,
+        supplied_pdfs=supplied_pdfs,
+        enrich=enrich,
+        email=email,
+    )
 
     # parent_resolved is None for the root.
     queue: deque[QueueItem] = deque()
@@ -488,7 +497,6 @@ def trace_reverse(
 
                 if node_id in visited_node_ids:
                     # Already in graph — just wire a new edge if needed.
-                    existing_key = (node_id, current_node_id)
                     if not any(
                         e.source_id == node_id and e.target_id == current_node_id
                         for e in graph.edges
@@ -598,12 +606,7 @@ def _short(s: str | None, n: int = 80) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-#: Max plausible gap between two candidate years for the same paper.
-#: GROBID's bibliography parser occasionally produces garbage years (e.g.
-#: it grabs a page number, or the year of a neighbouring citation in the
-#: raw text). We only honour the older candidate when it's within this
-#: window — typical preprint → final-publication gaps are 0-2 years.
-_YEAR_GAP_THRESHOLD = 2
+_YEAR_GAP_THRESHOLD = YEAR_GAP_THRESHOLD
 
 
 def _plausible(y: int | None) -> bool:
