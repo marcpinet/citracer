@@ -1,7 +1,7 @@
 """Tests for citracer.source_resolver — input routing and validation.
 
-We don't call the network here; the resolver's _download_arxiv /
-_download_openreview / _s2_by_id methods are monkey-patched.
+We don't call the network here; the resolver's download methods are
+provided by a fake that records calls and returns canned results.
 """
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -31,23 +31,23 @@ class _FakeResolver:
         self.scihub_calls: list[str] = []
         self.generic_calls: list[str] = []
 
-    def _download_arxiv(self, arxiv_id: str) -> Path | None:
+    def download_arxiv(self, arxiv_id: str) -> Path | None:
         self.arxiv_calls.append(arxiv_id)
         return self.fake_pdf
 
-    def _download_openreview(self, forum_id: str) -> Path | None:
+    def download_openreview(self, forum_id: str) -> Path | None:
         self.openreview_calls.append(forum_id)
         return self.fake_pdf
 
-    def _s2_by_id(self, id_str: str) -> dict | None:
+    def s2_by_id(self, id_str: str) -> dict | None:
         self.s2_calls.append(id_str)
         return self.arxiv_meta
 
-    def _download_scihub(self, doi: str) -> Path | None:
+    def download_scihub(self, doi: str) -> Path | None:
         self.scihub_calls.append(doi)
         return self.fake_pdf if self.scihub_returns else None
 
-    def _download_generic_pdf(self, url: str, paper_id: str) -> Path | None:
+    def download_generic_pdf(self, url: str, paper_id: str) -> Path | None:
         self.generic_calls.append(url)
         return None
 
@@ -116,7 +116,7 @@ class TestArxivInput:
 
     def test_download_failure_raises(self, tmp_path):
         r = _FakeResolver(tmp_path=tmp_path)
-        r._download_arxiv = lambda aid: None  # type: ignore[assignment]
+        r.download_arxiv = lambda aid: None  # type: ignore[assignment]
         with pytest.raises(ValueError, match="Could not download"):
             resolve_source(
                 pdf=None, doi=None, arxiv_id="9999.99999", url=None, resolver=r

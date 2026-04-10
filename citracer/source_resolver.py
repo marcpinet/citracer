@@ -106,7 +106,7 @@ def resolve_source(
         if not aid:
             raise ValueError(f"Invalid arXiv id: {arxiv_id!r}")
         logger.info("Resolving root from arXiv:%s", aid)
-        path = resolver._download_arxiv(aid)  # type: ignore[attr-defined]
+        path = resolver.download_arxiv(aid)
         if not path:
             raise ValueError(f"Could not download arXiv paper {aid}")
         return path
@@ -120,7 +120,7 @@ def resolve_source(
         if m:
             aid = normalize_arxiv_id(m.group(1))
             logger.info("DOI %s is an arXiv DOI, routing to arxiv:%s", d, aid)
-            path = resolver._download_arxiv(aid)  # type: ignore[attr-defined]
+            path = resolver.download_arxiv(aid)
             if not path:
                 raise ValueError(f"Could not download arXiv paper {aid}")
             return path
@@ -141,14 +141,14 @@ def _download_by_doi(doi: str, resolver: ReferenceResolver) -> Path:
     logger.info("Resolving root from DOI %s", d)
 
     # Try S2 first for metadata + arxiv redirect
-    meta = resolver._s2_by_id(f"DOI:{d}")  # type: ignore[attr-defined]
+    meta = resolver.s2_by_id(f"DOI:{d}")
     if meta and meta.get("arxiv_id"):
-        path = resolver._download_arxiv(meta["arxiv_id"])  # type: ignore[attr-defined]
+        path = resolver.download_arxiv(meta["arxiv_id"])
         if path:
             return path
 
     # Try Sci-Hub
-    path = resolver._download_scihub(d)  # type: ignore[attr-defined]
+    path = resolver.download_scihub(d)
     if path:
         return path
 
@@ -156,7 +156,7 @@ def _download_by_doi(doi: str, resolver: ReferenceResolver) -> Path:
     if meta and meta.get("open_access_url"):
         from .utils import make_paper_id
         pid = make_paper_id(doi=d)
-        path = resolver._download_generic_pdf(meta["open_access_url"], pid)  # type: ignore[attr-defined]
+        path = resolver.download_generic_pdf(meta["open_access_url"], pid)
         if path:
             return path
 
@@ -166,7 +166,7 @@ def _download_by_doi(doi: str, resolver: ReferenceResolver) -> Path:
     pdf_url = build_preprint_pdf_url(d, meta.get("open_access_url") if meta else None)
     if pdf_url:
         pid = make_paper_id(doi=d)
-        path = resolver._download_generic_pdf(pdf_url, pid)  # type: ignore[attr-defined]
+        path = resolver.download_generic_pdf(pdf_url, pid)
         if path:
             return path
 
@@ -178,7 +178,7 @@ def _download_by_doi(doi: str, resolver: ReferenceResolver) -> Path:
 
 def _download_openreview(forum_id: str, resolver: ReferenceResolver) -> Path:
     """Fetch a root PDF from OpenReview using the shared resolver's helper."""
-    path = resolver._download_openreview(forum_id)  # type: ignore[attr-defined]
+    path = resolver.download_openreview(forum_id)
     if path:
         return path
     raise ValueError(f"Could not download OpenReview paper {forum_id}")

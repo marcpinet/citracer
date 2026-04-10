@@ -359,6 +359,7 @@ def trace(
         # wait=False means we don't block waiting for in-flight workers.
         executor.shutdown(wait=False, cancel_futures=True)
         resolve_executor.shutdown(wait=False, cancel_futures=True)
+        resolver.close()
         pbar.close()
         if prev_handler is not None:
             try:
@@ -496,17 +497,13 @@ def trace_reverse(
                     continue
 
                 if node_id in visited_node_ids:
-                    # Already in graph — just wire a new edge if needed.
-                    if not any(
-                        e.source_id == node_id and e.target_id == current_node_id
-                        for e in graph.edges
-                    ):
-                        graph.add_edge(CitationEdge(
-                            source_id=node_id,
-                            target_id=current_node_id,
-                            context=matched_contexts[0] if matched_contexts else "",
-                            depth=depth + 1,
-                        ))
+                    # Already in graph — add_edge deduplicates automatically.
+                    graph.add_edge(CitationEdge(
+                        source_id=node_id,
+                        target_id=current_node_id,
+                        context=matched_contexts[0] if matched_contexts else "",
+                        depth=depth + 1,
+                    ))
                     continue
 
                 visited_node_ids.add(node_id)
@@ -526,6 +523,7 @@ def trace_reverse(
                 if s2_next and depth + 1 < max_depth:
                     queue.append((s2_next, node_id, depth + 1))
     finally:
+        resolver.close()
         pbar.close()
         if prev_handler is not None:
             try:

@@ -86,10 +86,18 @@ class CitationEdge:
 class TracerGraph:
     nodes: dict[str, PaperNode] = field(default_factory=dict)
     edges: list[CitationEdge] = field(default_factory=list)
+    _edge_index: set[tuple[str, str, str]] = field(default_factory=set, repr=False)
 
     def add_node(self, node: PaperNode) -> None:
         if node.paper_id not in self.nodes:
             self.nodes[node.paper_id] = node
 
     def add_edge(self, edge: CitationEdge) -> None:
+        key = (edge.source_id, edge.target_id, edge.edge_type)
+        if key in self._edge_index:
+            return
+        self._edge_index.add(key)
         self.edges.append(edge)
+
+    def has_edge(self, source_id: str, target_id: str, edge_type: str = "primary") -> bool:
+        return (source_id, target_id, edge_type) in self._edge_index
