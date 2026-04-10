@@ -56,7 +56,8 @@ S2_FIELDS = "paperId,title,authors,year,publicationDate,abstract,externalIds,ope
 S2_CITATION_FIELDS = (
     "contexts,intents,"
     "citingPaper.paperId,citingPaper.title,citingPaper.authors,"
-    "citingPaper.year,citingPaper.externalIds,citingPaper.abstract"
+    "citingPaper.year,citingPaper.publicationDate,"
+    "citingPaper.externalIds,citingPaper.abstract"
 )
 
 OPENREVIEW_V2 = "https://api2.openreview.net"

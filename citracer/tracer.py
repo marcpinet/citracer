@@ -585,6 +585,7 @@ def _node_from_s2_paper(
         title=title or "(unknown)",
         authors=[a.get("name") for a in (cp.get("authors") or []) if a.get("name")],
         year=year,
+        publication_date=cp.get("publicationDate"),
         original_year=year,
         arxiv_id=arxiv_id,
         doi=doi,
@@ -592,6 +593,7 @@ def _node_from_s2_paper(
         depth=depth,
         status="analyzed",  # keyword was matched in at least one citation context
         keyword_hits=keyword_hits,
+        keyword_hit_types=["regex"] * len(keyword_hits),
         url=url,
     )
     return paper_id, node

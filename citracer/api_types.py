@@ -35,6 +35,7 @@ class S2Paper(TypedDict, total=False):
     title: str | None
     authors: list[S2Author]
     year: int | None
+    publicationDate: str | None
     abstract: str | None
     externalIds: S2ExternalIds
     openAccessPdf: S2OpenAccessPdf | None
