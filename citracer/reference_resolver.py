@@ -462,7 +462,16 @@ class ReferenceResolver:
         best = None
         best_score = 0.0
         for r in results:
-            score = fuzz.token_set_ratio(target, normalize_title(r.title))
+            candidate = normalize_title(r.title)
+            # Use the minimum of token_set_ratio and token_sort_ratio.
+            # token_set_ratio alone is too permissive: two papers sharing
+            # common domain vocabulary (e.g. "time series ... neural networks")
+            # can score >85 despite being completely different papers.
+            # token_sort_ratio catches this by penalizing structural differences.
+            score = min(
+                fuzz.token_set_ratio(target, candidate),
+                fuzz.token_sort_ratio(target, candidate),
+            )
             if score > best_score:
                 best_score = score
                 best = r
@@ -635,7 +644,11 @@ class ReferenceResolver:
         best = None
         best_score = 0.0
         for c in candidates:
-            score = fuzz.token_set_ratio(target, normalize_title(c["title"] or ""))
+            candidate = normalize_title(c["title"] or "")
+            score = min(
+                fuzz.token_set_ratio(target, candidate),
+                fuzz.token_sort_ratio(target, candidate),
+            )
             if score > best_score:
                 best_score = score
                 best = c
