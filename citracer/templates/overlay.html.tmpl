@@ -790,12 +790,14 @@
       }
       const visibleCount = expanded ? d.keyword_hits.length : Math.min(5, d.keyword_hits.length);
       html += '<div class="hits"><b>' + hitsLabel + '</b>';
+      const hitScores = d.keyword_hit_scores || [];
       for (let hi = 0; hi < visibleCount; hi++) {
         const isSem = hitTypes[hi] === "semantic";
         if (isSem) {
+          const score = hitScores[hi] ? hitScores[hi].toFixed(2) : '?';
           html += '<div class="hit-snippet" style="border-left:3px solid #9c27b0;padding-left:8px;">'
-                + '<span style="background:#9c27b0;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;">SEM</span> '
-                + '<span style="color:#888;font-size:11px;">conceptual match — keyword not literally present</span>'
+                + '<span style="background:#9c27b0;color:#fff;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;">SEM ' + score + '</span> '
+                + '<span style="color:#888;font-size:11px;">conceptual match</span>'
                 + '<br>' + escapeHtml(d.keyword_hits[hi])
                 + '</div>';
         } else {

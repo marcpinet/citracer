@@ -45,6 +45,7 @@ class KeywordHit:
     ref_keys: list[str]     # bib keys of references within the context window
     keyword: str = ""       # which keyword produced this hit (multi-keyword mode)
     match_type: str = "regex"  # "regex" or "semantic"
+    semantic_score: float = 0.0  # cosine similarity (only set for semantic hits)
 
 
 @dataclass
@@ -59,9 +60,9 @@ class PaperNode:
     abstract: str | None = None
     citation_count: int | None = None
     keyword_hits: list[str] = field(default_factory=list)
-    # Parallel list: match_type for each keyword_hit ("regex" or "semantic").
-    # Only used by the visualizer for the SEM badge; not exported to JSON/GraphML.
-    keyword_hit_types: list[str] = field(default_factory=list, repr=False)
+    # Parallel lists for each keyword_hit. Only used by the visualizer; not exported.
+    keyword_hit_types: list[str] = field(default_factory=list, repr=False)   # "regex" or "semantic"
+    keyword_hit_scores: list[float] = field(default_factory=list, repr=False)  # cosine sim (0 for regex)
     status: str = "pending"  # "analyzed" | "unavailable" | "no_match" | "root"
     depth: int = 0
     is_new: bool = False     # set by --diff / --since, rendering overlay only

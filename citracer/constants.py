@@ -41,10 +41,11 @@ KEYWORD_MORPHO_MIN_LEN: int = 4
 SEMANTIC_DEFAULT_MODEL: str = "all-mpnet-base-v2"
 
 #: Cosine similarity threshold for semantic matching. Benchmarked
-#: at 0.30 for best F1 on academic citation text: catches 7/8
-#: conceptual matches with zero false positives. The regex pass
-#: already provides precision, so the semantic pass can be permissive.
-SEMANTIC_SIMILARITY_THRESHOLD: float = 0.30
+#: at 0.40 on real academic text from deep traces (depth 5): zero
+#: false positives while keeping 4/7 true conceptual matches. Lower
+#: values (0.30-0.35) match generic DL/ML sentences about layers,
+#: attention, and decoders that have nothing to do with the keyword.
+SEMANTIC_SIMILARITY_THRESHOLD: float = 0.40
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +78,20 @@ S2_CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = 120.0
 #: arxiv recovers slowly from rate-limits and aggressive retry just makes
 #: it worse for everyone.
 ARXIV_COOLDOWN_AFTER_FAILURE_SECONDS: float = 60.0
+
+#: Number of consecutive OpenReview failures (timeouts, HTTP errors) after
+#: which we skip OpenReview for the cooldown period. Each failed search
+#: tries v2 + v1 endpoints (2 × timeout), so 2 consecutive failures
+#: waste ~40s. Tripping after 2 saves minutes on deep traces.
+OPENREVIEW_CIRCUIT_BREAKER_THRESHOLD: int = 2
+
+#: After tripping the OpenReview circuit breaker, skip OpenReview calls
+#: for this many seconds.
+OPENREVIEW_CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = 120.0
+
+#: OpenReview search request timeout (seconds). Reduced from 20s to 10s
+#: to fail faster when the service is unresponsive.
+OPENREVIEW_TIMEOUT_SECONDS: float = 10.0
 
 #: Minimum delay (seconds) between arxiv.org API requests. arxiv asks users
 #: to stay under ~3 seconds between requests; the `arxiv` package enforces

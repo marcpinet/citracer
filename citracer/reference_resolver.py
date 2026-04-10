@@ -31,7 +31,10 @@ from .constants import (
     ARXIV_MIN_INTERVAL,
     ARXIV_NUM_RETRIES,
     ARXIV_PAGE_SIZE,
+    OPENREVIEW_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
+    OPENREVIEW_CIRCUIT_BREAKER_THRESHOLD,
     OPENREVIEW_FUZZY_MATCH_THRESHOLD,
+    OPENREVIEW_TIMEOUT_SECONDS,
     PDF_DOWNLOAD_TIMEOUT_SECONDS,
     S2_429_BACKOFF_DELAYS,
     S2_429_CIRCUIT_BREAKER_THRESHOLD,
@@ -139,6 +142,8 @@ class ReferenceResolver:
         self._s2_consecutive_429s = 0
         self._s2_breaker_tripped_at: float | None = None
         self._arxiv_breaker_tripped_at: float | None = None
+        self._orev_consecutive_failures = 0
+        self._orev_breaker_tripped_at: float | None = None
         self._breaker_lock = threading.Lock()
         self._arxiv_client = arxiv.Client(
             page_size=ARXIV_PAGE_SIZE,
@@ -202,6 +207,32 @@ class ReferenceResolver:
                     "arxiv API rate-limited; skipping arxiv search for %.0fs",
                     ARXIV_COOLDOWN_AFTER_FAILURE_SECONDS,
                 )
+
+    def _orev_circuit_open(self) -> bool:
+        with self._breaker_lock:
+            if self._orev_breaker_tripped_at is None:
+                return False
+            if time.time() - self._orev_breaker_tripped_at > OPENREVIEW_CIRCUIT_BREAKER_COOLDOWN_SECONDS:
+                self._orev_breaker_tripped_at = None
+                self._orev_consecutive_failures = 0
+                return False
+            return True
+
+    def _orev_record_failure(self) -> None:
+        with self._breaker_lock:
+            self._orev_consecutive_failures += 1
+            if (self._orev_consecutive_failures >= OPENREVIEW_CIRCUIT_BREAKER_THRESHOLD
+                    and self._orev_breaker_tripped_at is None):
+                self._orev_breaker_tripped_at = time.time()
+                logger.warning(
+                    "OpenReview failed %d times in a row; skipping for %.0fs",
+                    self._orev_consecutive_failures,
+                    OPENREVIEW_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
+                )
+
+    def _orev_record_success(self) -> None:
+        with self._breaker_lock:
+            self._orev_consecutive_failures = 0
 
     # ---------- public ----------
 
@@ -605,6 +636,10 @@ class ReferenceResolver:
         """Search OpenReview by title. Tries v2 then v1 (ICLR<=2022 lives in v1).
         Returns {openreview_id, title, authors, abstract} on success.
         """
+        if self._orev_circuit_open():
+            logger.debug("OpenReview search skipped (circuit breaker open)")
+            return None
+
         cache_key = normalize_title(title)[:120]
         hit, cached = self.meta_cache.get("orev", cache_key)
         if hit:
@@ -612,16 +647,18 @@ class ReferenceResolver:
 
         target = normalize_title(title)
         candidates: list[OpenReviewCandidate] = []
+        failed = False
         for base in (OPENREVIEW_V2, OPENREVIEW_V1):
             try:
                 r = requests.get(
                     f"{base}/notes/search",
                     params={"term": title[:200], "content": "all", "source": "forum", "limit": 5},
                     headers={"User-Agent": BROWSER_UA, "Accept": "application/json"},
-                    timeout=20,
+                    timeout=OPENREVIEW_TIMEOUT_SECONDS,
                 )
             except Exception as e:
                 logger.warning("OpenReview %s failed: %s", base, e)
+                failed = True
                 continue
             if r.status_code != 200:
                 logger.debug("OpenReview %s -> HTTP %s", base, r.status_code)
@@ -642,8 +679,11 @@ class ReferenceResolver:
                 break
 
         if not candidates:
-            # Not cached — see note on negative caching in _arxiv_search_by_title.
+            if failed:
+                self._orev_record_failure()
             return None
+
+        self._orev_record_success()
 
         best = None
         best_score = 0.0

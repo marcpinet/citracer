@@ -178,7 +178,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="T",
         help="Cosine similarity threshold for semantic matching "
-             "(default: 0.30, range 0.0-1.0). Implies --semantic.",
+             "(default: 0.40, range 0.0-1.0). Implies --semantic.",
     )
     p.add_argument("--no-open", action="store_true", help="Do not open the result in a browser.")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -316,6 +316,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # --semantic-model and --semantic-threshold imply --semantic
     use_semantic = args.semantic or args.semantic_model is not None or args.semantic_threshold is not None
+    if use_semantic:
+        try:
+            from .keyword_matcher import _get_semantic_model
+            _get_semantic_model(args.semantic_model)
+        except ImportError as e:
+            logger.error("%s", e)
+            return 2
     if use_semantic and args.reverse:
         logger.warning("--semantic is not supported in reverse trace mode (ignored)")
         use_semantic = False

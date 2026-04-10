@@ -152,7 +152,7 @@ citracer --pdf paper.pdf --keyword "attention" --semantic --semantic-threshold 0
 | `--since` | none | Highlight nodes published on or after this date (`YYYY` or `YYYY-MM`). Works alone (date filter) or with `--diff` (intersection: new AND recent). Uses S2 `publicationDate` for month precision when available, falls back to year |
 | `--semantic` | off | Enable semantic matching: after the regex pass, scan remaining sentences with a [sentence-transformer](https://www.sbert.net/) embedding model to catch conceptual matches the regex missed (e.g. "univariate processing" for the keyword "channel-independent"). Requires `pip install citracer[semantic]` |
 | `--semantic-model` | `all-mpnet-base-v2` | Sentence-transformer model name for `--semantic`. Implies `--semantic` |
-| `--semantic-threshold` | `0.30` | Cosine similarity threshold for semantic matching (0.0-1.0). Lower = more recall, higher = more precision. Implies `--semantic` |
+| `--semantic-threshold` | `0.40` | Cosine similarity threshold for semantic matching (0.0-1.0). Lower = more recall, higher = more precision. Implies `--semantic` |
 
 ### Output
 
@@ -280,7 +280,7 @@ Caveats: reverse trace depends entirely on S2 being reachable and having indexed
 
 The default regex handles morphological variants (e.g. `channel-independent` matches `channel-independence`, `channel independently`) but misses papers that express the same concept with different vocabulary: "univariate processing", "per-channel modeling", "decoupled channel correlations".
 
-`--semantic` adds a second pass after the regex: every sentence the regex *didn't* already match is embedded with a [sentence-transformer](https://www.sbert.net/) model (default: `all-mpnet-base-v2`, ~420MB) and compared to the keyword by cosine similarity. Sentences above the threshold (default 0.30) are added as additional hits. The result is a union: all regex matches plus any conceptual matches the embedding caught.
+`--semantic` adds a second pass after the regex: every sentence the regex *didn't* already match is embedded with a [sentence-transformer](https://www.sbert.net/) model (default: `all-mpnet-base-v2`, ~420MB) and compared to the keyword by cosine similarity. Sentences above the threshold (default 0.40) are added as additional hits. The result is a union: all regex matches plus any conceptual matches the embedding caught.
 
 ```bash
 pip install citracer[semantic]

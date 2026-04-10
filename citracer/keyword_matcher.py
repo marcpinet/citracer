@@ -205,6 +205,7 @@ def _semantic_search(
         if sim >= threshold:
             idx = candidate_indices[j]
             hit = _hit_from_sentence(text, spans, idx, inline_refs, match_type="semantic")
+            hit.semantic_score = float(sim)
             hits.append(hit)
             logger.debug(
                 "Semantic hit (sim=%.3f) in sentence %d: %s",

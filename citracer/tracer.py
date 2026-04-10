@@ -229,6 +229,7 @@ def trace(
 
         node.keyword_hits = [h.passage for h in all_hits]
         node.keyword_hit_types = [h.match_type for h in all_hits]
+        node.keyword_hit_scores = [h.semantic_score for h in all_hits]
 
         if not matched:
             if node.status != "root":
@@ -594,6 +595,7 @@ def _node_from_s2_paper(
         status="analyzed",  # keyword was matched in at least one citation context
         keyword_hits=keyword_hits,
         keyword_hit_types=["regex"] * len(keyword_hits),
+        keyword_hit_scores=[0.0] * len(keyword_hits),
         url=url,
     )
     return paper_id, node
