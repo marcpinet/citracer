@@ -6,9 +6,9 @@ https://github.com/user-attachments/assets/36855b62-a9ab-4404-90c3-9ac7f418899c
 
 ## 📝 Description
 
-Trace citation chains for any keyword across research papers.
+Trace citation chains for any keyword - or concept - across research papers.
 
-Given a source PDF and a keyword, citracer parses the bibliography with GROBID, finds every occurrence of the keyword in the body, identifies the references cited near each occurrence, downloads those papers, and recursively walks the resulting citation graph. The output is an interactive HTML page.
+Given a source PDF and a keyword, citracer parses the bibliography with GROBID, finds every occurrence of the keyword in the body, identifies the references cited near each occurrence, downloads those papers, and recursively walks the resulting citation graph. The output is an interactive HTML page. With `--semantic`, matching goes beyond literal keywords: a sentence-transformer embedding model catches passages that express the same concept with different vocabulary (e.g. "univariate processing" matches a trace for "channel-independent").
 
 > **Supported sources.** citracer resolves cited papers through [arXiv](https://arxiv.org/), [Semantic Scholar](https://www.semanticscholar.org/), [OpenReview](https://openreview.net/), [Sci-Hub](https://sci-hub.in/), and Semantic Scholar's open-access PDF links (which cover PMC, publisher OA pages, and more). Preprint servers [bioRxiv](https://www.biorxiv.org/), [medRxiv](https://www.medrxiv.org/), [ChemRxiv](https://chemrxiv.org/), [SSRN](https://www.ssrn.com/), [PsyArXiv](https://psyarxiv.com/), [AgriXiv](https://agrixiv.org/), and [engrXiv](https://engrxiv.org/) are also supported. Papers that still can't be downloaded appear as `unavailable` nodes, but can be enriched with metadata (title, abstract, year, citation count) via [OpenAlex](https://openalex.org/) using the `--enrich` flag. You can also supply a local PDF for any unavailable node with `--supply-pdf`.
 
@@ -135,8 +135,8 @@ citracer --pdf paper.pdf --keyword "attention" --semantic --semantic-threshold 0
 
 | Flag | Default | Description |
 |---|---|---|
-| `--keyword` | *required* | Term to trace through citations. **Repeat** to trace multiple keywords at once |
-| `--match-mode` | `any` | In multi-keyword mode, `any` marks a paper as matched if at least one keyword appears; `all` requires every keyword to appear at least once |
+| `--keyword` | *required* | Term (or concept) to trace through citations. By default, matches morphological variants via regex (e.g. "independent" also matches "independence", "independently"). With `--semantic`, also matches passages that express the same concept in different words. **Repeat** to trace multiple keywords at once |
+| `--match-mode` | `any` | In multi-keyword mode, `any` marks a paper as matched if at least one keyword is found (regex or semantic); `all` requires every keyword to match at least once |
 | `--depth` | `3` | Maximum recursion depth |
 | `--context-window` | sentence-based | If set, fall back to a ±N character window for ref association instead of sentence-based |
 | `--consolidate` | off | Ask GROBID to consolidate each bibliographic reference against CrossRef (more accurate titles/DOIs but ~2-5s extra per PDF) |
@@ -172,8 +172,8 @@ Nodes are colored by status:
 | Color | Status | Meaning |
 |---|---|---|
 | blue | `root` | The source PDF |
-| green | `analyzed` | PDF retrieved and the keyword was found in its text |
-| gray | `analyzed (no match)` | PDF retrieved and parsed, but the keyword does not appear |
+| green | `analyzed` | PDF retrieved and the keyword (or concept, with `--semantic`) was found in its text |
+| gray | `analyzed (no match)` | PDF retrieved and parsed, but the keyword was not found (neither by regex nor semantic matching) |
 | red | `unavailable` | PDF could not be retrieved |
 | orange | `new` | Paper not present in the `--diff` baseline and/or published after the `--since` date. Only appears when `--diff` or `--since` is used |
 
@@ -181,8 +181,8 @@ Edges come in two flavors:
 
 | Style | Type | Meaning |
 |---|---|---|
-| solid dark | keyword-associated | Paper A cites paper B in the same sentence (or the next) as a keyword occurrence |
-| dashed blue | bibliographic link | Paper A's bibliography also references paper B, independently of where the keyword appears. Hidden by default, toggle via the legend |
+| solid dark | keyword-associated | Paper A cites paper B in the same sentence (or the next) as a keyword match (regex or semantic) |
+| dashed blue | bibliographic link | Paper A's bibliography also references paper B, independently of any keyword match. Hidden by default, toggle via the legend |
 
 ### Interactive controls
 
@@ -191,7 +191,7 @@ A control panel in the top-left corner of the graph lets you tune the view on th
 | Control | Options | Effect |
 |---|---|---|
 | **layout** | Sugiyama (by year) *(default)*<br>Sugiyama (by depth)<br>Force-directed (BarnesHut)<br>Fruchterman-Reingold (approx) | Switches the layout algorithm. Sugiyama-by-year places the oldest papers at the top, making it easy to spot which paper first introduced the concept |
-| **node size** | in-graph citations *(default)*<br>keyword hits<br>PageRank<br>betweenness | `in-graph citations` scales node size with the number of incoming edges visible in the graph. `keyword hits` scales by the count of keyword occurrences. `PageRank` and `betweenness` use the corresponding centrality metric computed on the citation graph |
+| **node size** | in-graph citations *(default)*<br>keyword hits<br>PageRank<br>betweenness | `in-graph citations` scales node size with the number of incoming edges visible in the graph. `keyword hits` scales by the count of keyword matches (regex + semantic). `PageRank` and `betweenness` use the corresponding centrality metric computed on the citation graph |
 | **spread** | slider (0.3× to 3.0×) | Rescales all node positions from the graph's centroid, stretching or compressing the layout without deforming it. Works with any layout mode |
 | **curved edges** | checkbox *(on by default)* | Toggle between curved (cubicBezier/curvedCW) and straight edge rendering |
 | **nodes (legend)** | click rows to toggle | Hide/show nodes by status. When `--diff` or `--since` is used, an orange **new** row appears to toggle new papers |
@@ -199,7 +199,7 @@ A control panel in the top-left corner of the graph lets you tune the view on th
 
 Other interactive features:
 
-- **Hover** any node → side panel updates live with title, authors, year, citation count, status, centrality metrics (PageRank, betweenness, in/out degree), a **PIVOT** badge for pivot papers, keyword hits (with highlighted occurrences) and a collapsible **abstract** section when available
+- **Hover** any node → side panel updates live with title, authors, year, citation count, status, centrality metrics (PageRank, betweenness, in/out degree), a **PIVOT** badge for pivot papers, keyword hits (regex matches are highlighted; semantic matches show a purple **SEM** badge with the note "conceptual match") and a collapsible **abstract** section when available
 - **Search** box in the control panel → fuzzy match by title or author, click a result to focus-and-pin the matching node
 - **Click** a node → pins the panel; a blue border is drawn around the node to show the pinned state. The pin survives clicks on the empty canvas, hover on other nodes, and pan/zoom. It's only released by clicking the same node again, pressing the × close button on the info panel, or picking **Unpin** from the right-click menu
 - **Right-click** any node → context menu with **Hide** (permanently hides the node until you click the "show N manually hidden" banner in the legend), **Pin/Unpin**, and **Open link** (opens the arxiv/OpenReview/DOI page in a new tab)
@@ -217,7 +217,7 @@ Every trace automatically computes quantitative metrics on the citation graph:
 | **PageRank** | per-node | Importance of a paper relative to the citation structure |
 | **Betweenness centrality** | per-node | Identifies "bridge" papers that connect different clusters |
 | **In/out degree** | per-node | Number of incoming/outgoing edges in the graph |
-| **Pivot detection** | per-node | Flags the earliest keyword-matched paper in each connected component, plus high-betweenness papers with the keyword |
+| **Pivot detection** | per-node | Flags the earliest keyword-matched paper (regex or semantic) in each connected component, plus high-betweenness papers with the keyword |
 | **Graph density** | global | Ratio of actual edges to maximum possible edges |
 | **Avg degree** | global | Mean number of connections per node |
 | **Connected components** | global | Number of weakly connected subgraphs |
@@ -245,7 +245,7 @@ This allows anyone receiving a citracer graph to re-run the trace with identical
 
 2. **Inline ref recovery.** GROBID occasionally misses narrative citations like `DLinear Zeng et al. (2023)`, especially when the author name isn't preceded by a parenthesis. A supplementary pass scans the text for canonical author-year patterns (`Surname et al. (Year)`, `Surname & Other (Year)`, `Surname (Year)`) and adds them as inline refs whenever the `(surname, year)` signature matches a unique bibliography entry. In typical ML papers this recovers dozens of refs per document.
 
-3. **Keyword matching.** The keyword is compiled to a flexible regex that handles morphological variants (e.g. `channel-independent` matches `channel-independence`, `channel independently`, `channelindependence`). The body is segmented into sentences with [pysbd](https://github.com/nipunsadvilkar/pySBD), and each occurrence of the keyword is associated with the references cited in the same sentence or the immediately following one.
+3. **Keyword matching (regex + optional semantic).** The keyword is first compiled to a flexible regex that handles morphological variants (e.g. `channel-independent` matches `channel-independence`, `channel independently`, `channelindependence`). The body is segmented into sentences with [pysbd](https://github.com/nipunsadvilkar/pySBD), and each occurrence of the keyword is associated with the references cited in the same sentence or the immediately following one. When `--semantic` is enabled, a second pass scans every sentence the regex *didn't* match using a sentence-transformer embedding model: sentences whose embedding is close enough to the keyword (cosine similarity above the threshold) are added as additional hits. This catches conceptual matches where the idea is expressed with entirely different vocabulary - for example, tracing "channel-independent" also surfaces passages about "decoupled cross-channel correlations" or "per-variate processing". Regex hits and semantic hits are unioned, so `--semantic` only adds recall without losing any existing matches.
 
 4. **Reference resolution.** Each cited paper is resolved through the following cascade:
    1. If GROBID extracted a DOI or arXiv ID, use it directly.
@@ -262,7 +262,7 @@ This allows anyone receiving a citracer graph to re-run the trace with identical
 
 6. **Cross-graph bibliographic links.** After the recursive trace is complete, a post-processing pass scans every parsed paper's bibliography against every other node in the graph and adds dashed "bibliographic link" edges for pairs that cite each other but not in the keyword's neighborhood. Matching is exact on DOI/arXiv IDs and fuzzy (rapidfuzz, threshold 88) on titles. No external API calls are needed: everything runs on the already-in-memory graph, so the cost is negligible.
 
-7. **Bibliometric analytics.** After the trace completes, citracer computes per-node centrality metrics (PageRank, betweenness) and graph-wide statistics (density, connected components, keyword density timeline) using [networkx](https://networkx.org/). Pivot papers — the earliest keyword-matched paper in each connected component, plus high-betweenness nodes with the keyword — are automatically flagged. A reproducibility manifest (`manifest.json`) is written alongside the graph, encoding the full trace parameters, environment, and results.
+7. **Bibliometric analytics.** After the trace completes, citracer computes per-node centrality metrics (PageRank, betweenness) and graph-wide statistics (density, connected components, keyword density timeline) using [networkx](https://networkx.org/). Pivot papers - the earliest keyword-matched paper in each connected component, plus high-betweenness nodes with the keyword - are automatically flagged. A reproducibility manifest (`manifest.json`) is written alongside the graph, encoding the full trace parameters, environment, and results.
 
 8. **Rendering.** The graph is serialized to an interactive HTML page using [pyvis](https://pyvis.readthedocs.io/), with a custom overlay providing the layout/size/spread controls, the legend filters, the side info panel, keyword highlighting, and KaTeX math.
 
@@ -270,7 +270,7 @@ This allows anyone receiving a citracer graph to re-run the trace with identical
 
 The forward algorithm walks DOWN from a root paper into its bibliography. `--reverse` walks UP: "who cites this paper, and which of them mention the keyword in their citation context?".
 
-The key trick is that Semantic Scholar's `/paper/{id}/citations` endpoint returns a `contexts` field for each citing paper: an array of 1-2 sentence snippets around every place that paper cites the source. We apply the same morphological keyword regex to those snippets locally. A paper whose citation contexts don't contain the keyword is rejected without downloading anything. A paper with a matching context is added to the graph with the snippet as its `keyword_hits`, plus its title/authors/year/arxiv-id from S2 metadata. No GROBID call, no arXiv download.
+The key trick is that Semantic Scholar's `/paper/{id}/citations` endpoint returns a `contexts` field for each citing paper: an array of 1-2 sentence snippets around every place that paper cites the source. We apply the same morphological keyword regex to those snippets locally. A paper whose citation contexts don't contain the keyword is rejected without downloading anything. A paper with a matching context is added to the graph with the snippet as its `keyword_hits`, plus its title/authors/year/arxiv-id from S2 metadata. No GROBID call, no arXiv download. (Note: `--semantic` is not available in reverse mode - the snippets are too short for reliable embedding-based matching.)
 
 For a paper with 2000+ citations, this runs in ~10-30 seconds and typically surfaces 20-100 relevant papers, depending on how specific the keyword is. Deep recursion (`--depth > 1`) is supported but capped per-level by `--reverse-limit` because each level can multiply the number of S2 calls.
 
@@ -287,11 +287,11 @@ pip install citracer[semantic]
 citracer --pdf paper.pdf --keyword "channel-independent" --semantic
 ```
 
-Semantic hits appear in the info panel with a purple **SEM** badge and the note *"conceptual match — keyword not literally present"*, so the user can distinguish them from regex hits at a glance. The header also shows a breakdown (e.g. "7 keyword hit(s) (5 regex + 2 semantic)").
+Semantic hits appear in the info panel with a purple **SEM** badge and the note *"conceptual match - keyword not literally present"*, so the user can distinguish them from regex hits at a glance. The header also shows a breakdown (e.g. "7 keyword hit(s) (5 regex + 2 semantic)").
 
 The model is loaded once and cached in memory for the duration of the trace. Sentence embeddings are batch-encoded (~50-200ms per paper on CPU), so the overhead is small relative to the GROBID parse and API calls that dominate trace time.
 
-`--semantic-model NAME` switches to a different model (e.g. `all-MiniLM-L6-v2` for a lighter 80MB alternative, `paraphrase-MiniLM-L3-v2` for faster inference). `--semantic-threshold T` tunes the similarity cutoff — lower values increase recall at the cost of more false positives. Both flags imply `--semantic`.
+`--semantic-model NAME` switches to a different model (e.g. `all-MiniLM-L6-v2` for a lighter 80MB alternative, `paraphrase-MiniLM-L3-v2` for faster inference). `--semantic-threshold T` tunes the similarity cutoff - lower values increase recall at the cost of more false positives. Both flags imply `--semantic`.
 
 Semantic matching is not available in reverse trace mode (`--reverse`), which filters on S2 citation context snippets via regex only.
 
@@ -300,14 +300,14 @@ Semantic matching is not available in reverse trace mode (`--reverse`), which fi
 Citracer can compare a new trace against a previous one to highlight what changed. This turns a one-shot snapshot into a monitoring workflow:
 
 ```bash
-# Initial trace — export a baseline
+# Initial trace - export a baseline
 citracer --pdf paper.pdf --keyword "attention" --depth 3 --export baseline.json
 
-# Months later — re-run the same trace and diff
+# Months later - re-run the same trace and diff
 citracer --pdf paper.pdf --keyword "attention" --depth 3 --diff baseline.json
 ```
 
-Nodes that weren't in `baseline.json` are colored **orange** and labeled `NEW` in the info panel. Their original status (analyzed, no match, unavailable) is preserved — the orange overlay is purely visual. The legend gains a clickable **new (since last run)** row to toggle them on/off.
+Nodes that weren't in `baseline.json` are colored **orange** and labeled `NEW` in the info panel. Their original status (analyzed, no match, unavailable) is preserved - the orange overlay is purely visual. The legend gains a clickable **new (since last run)** row to toggle them on/off.
 
 `--since YYYY` or `--since YYYY-MM` highlights nodes published on or after a date. When combined with `--diff`, both conditions must be met (intersection): the paper must be absent from the baseline **and** published after the given date.
 
@@ -406,7 +406,7 @@ If you use citracer in your research, please cite it as:
 ```bibtex
 @software{pinet2026citracer,
   author       = {Pinet, Marc},
-  title        = {citracer: Keyword-Driven Citation Graph Tracer},
+  title        = {citracer: Keyword and Concept-Driven Citation Graph Tracer},
   year         = {2026},
   url          = {https://github.com/marcpinet/citracer},
   note         = {Python package available at \url{https://pypi.org/project/citracer/}}
