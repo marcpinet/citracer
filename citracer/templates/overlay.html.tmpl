@@ -158,6 +158,11 @@
 
   <hr style="border:none;border-top:1px solid #ddd;margin:8px 0;">
   <div class="citracer-control">
+    <label for="citracer-search">search</label>
+    <input type="search" id="citracer-search" placeholder="title, author…" autocomplete="off">
+  </div>
+  <div id="citracer-search-results" class="citracer-search-results"></div>
+  <div class="citracer-control">
     <label for="citracer-layout">layout</label>
     <select id="citracer-layout">
       <option value="sugiyama-year">Sugiyama (by year)</option>
@@ -179,15 +184,10 @@
     <label for="citracer-spread">spread</label>
     <input type="range" id="citracer-spread" min="0.3" max="3" step="0.05" value="1">
   </div>
-  <div class="citracer-control" style="flex-direction:row;align-items:center;gap:6px;">
+  <div class="citracer-control" style="justify-content:flex-start;">
     <input type="checkbox" id="citracer-curved" checked>
-    <label for="citracer-curved" style="min-width:0;">curved edges</label>
+    <label for="citracer-curved">curved edges</label>
   </div>
-  <div class="citracer-control">
-    <label for="citracer-search">search</label>
-    <input type="search" id="citracer-search" placeholder="title, author…" autocomplete="off">
-  </div>
-  <div id="citracer-search-results" class="citracer-search-results"></div>
 
   <hr style="border:none;border-top:1px solid #ddd;margin:8px 0;">
   <div style="font-size:11px;color:#888;margin-bottom:4px;">nodes (click to toggle)</div>
