@@ -167,7 +167,8 @@ def main(argv: list[str] | None = None) -> int:
     # Verify GROBID is reachable before starting. The pymupdf fallback exists
     # but produces much lower-quality output (author strings get parsed as
     # titles, etc.) so we surface this loudly and let the user opt in.
-    if not _check_grobid(args.grobid_url):
+    grobid_available = _check_grobid(args.grobid_url)
+    if not grobid_available:
         bar = "=" * 70
         logger.warning(bar)
         logger.warning("GROBID is not reachable at %s", args.grobid_url)
@@ -369,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         args=args,
         graph=graph,
         root_source=root_source,
-        grobid_available=_check_grobid(args.grobid_url),
+        grobid_available=grobid_available,
         s2_key_set=bool(s2_key),
         email_set=bool(email),
         depth=depth,

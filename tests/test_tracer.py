@@ -50,6 +50,9 @@ class _FakeResolver:
         self.by_key = by_key
         self.calls: list[str] = []
 
+    def close(self) -> None:
+        pass
+
     def resolve(self, bib: BibEntry) -> ResolvedRef:
         self.calls.append(bib.key)
         if bib.key not in self.by_key:
@@ -362,6 +365,7 @@ class TestReverseTrace:
         class _FakeResolver:
             def __init__(self, *_a, **_kw):
                 self.calls: list[tuple[str, int]] = []
+            def close(self): pass
             def get_citations(self, paper_id, limit=1000, page_size=100):
                 self.calls.append((paper_id, limit))
                 return citations
@@ -406,6 +410,7 @@ class TestReverseTrace:
 
         class _FakeResolver:
             def __init__(self, *_a, **_kw): pass
+            def close(self): pass
             def get_citations(self, *a, **k): return citations
 
         monkeypatch.setattr(tracer_mod, "ReferenceResolver", _FakeResolver)
@@ -441,6 +446,7 @@ class TestReverseTrace:
 
         class _FakeResolver:
             def __init__(self, *_a, **_kw): pass
+            def close(self): pass
             def get_citations(self, *a, **k): return citations
 
         monkeypatch.setattr(tracer_mod, "ReferenceResolver", _FakeResolver)
@@ -477,6 +483,7 @@ class TestReverseTrace:
         class _FakeResolver:
             call_count = 0
             def __init__(self, *_a, **_kw): pass
+            def close(self): pass
             def get_citations(self, paper_id, **_kw):
                 _FakeResolver.call_count += 1
                 # First call (root) -> level1; second call (l1) -> level2
@@ -511,6 +518,7 @@ class TestReverseTrace:
         class _FakeResolver:
             call_count = 0
             def __init__(self, *_a, **_kw): pass
+            def close(self): pass
             def get_citations(self, *a, **k):
                 _FakeResolver.call_count += 1
                 return [_s2_citation(

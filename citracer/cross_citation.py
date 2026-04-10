@@ -55,10 +55,6 @@ def add_secondary_edges(graph: TracerGraph) -> int:
 
     Matches are scoped to the graph we already built — no external API calls.
     """
-    existing: set[tuple[str, str]] = {
-        (e.source_id, e.target_id) for e in graph.edges
-    }
-
     added = 0
     for source in graph.nodes.values():
         if not source.bibliography:
@@ -66,8 +62,8 @@ def add_secondary_edges(graph: TracerGraph) -> int:
         for target in graph.nodes.values():
             if source.paper_id == target.paper_id:
                 continue
-            key = (source.paper_id, target.paper_id)
-            if key in existing:
+            # Don't add a secondary edge if a primary one already exists.
+            if graph.has_edge(source.paper_id, target.paper_id, "primary"):
                 continue
             match = _find_matching_bib(source.bibliography, target)
             if match is None:
@@ -85,7 +81,6 @@ def add_secondary_edges(graph: TracerGraph) -> int:
                 depth=max(source.depth, target.depth),
                 edge_type="secondary",
             ))
-            existing.add(key)
             added += 1
     return added
 

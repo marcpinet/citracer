@@ -203,6 +203,10 @@ class ReferenceResolver:
 
     # ---------- public ----------
 
+    def close(self) -> None:
+        """Close the underlying metadata cache."""
+        self.meta_cache.close()
+
     def resolve(self, bib: BibEntry) -> ResolvedRef:
         # Start with whatever GROBID extracted; merge enrichment in later.
         meta: dict = {
@@ -323,6 +327,24 @@ class ReferenceResolver:
             pdf_path=pdf_path,
             url=url,
         )
+
+    # ---------- public download helpers ----------
+    # Used by source_resolver to download the root paper.
+
+    def download_arxiv(self, arxiv_id: str) -> Path | None:
+        return self._download_arxiv(arxiv_id)
+
+    def download_scihub(self, doi: str) -> Path | None:
+        return self._download_scihub(doi)
+
+    def download_openreview(self, openreview_id: str) -> Path | None:
+        return self._download_openreview(openreview_id)
+
+    def download_generic_pdf(self, url: str, paper_id: str) -> Path | None:
+        return self._download_generic_pdf(url, paper_id)
+
+    def s2_by_id(self, id_str: str) -> NormalizedMeta | None:
+        return self._s2_by_id(id_str)
 
     # ---------- Semantic Scholar lookup ----------
 
