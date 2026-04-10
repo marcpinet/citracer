@@ -228,12 +228,17 @@ class TestContextForRef:
 
 
 # ---------------------------------------------------------------------------
-# Semantic matching (mocked — no real model in CI)
+# Semantic matching (mocked — requires numpy for fake embeddings)
 # ---------------------------------------------------------------------------
 
-import numpy as np
 from unittest.mock import patch, MagicMock
 from citracer import keyword_matcher as km_module
+
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
 
 
 class _FakeModel:
@@ -264,6 +269,7 @@ class _FakeModel:
         return embs
 
 
+@pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed (semantic tests need it)")
 class TestSemanticSearch:
     def _install_fake_model(self, sim_map):
         """Install a fake model into the module-level cache."""
