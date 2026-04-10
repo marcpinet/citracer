@@ -1,0 +1,57 @@
+site_name: citracer
+site_description: Trace citation chains for any keyword or concept across research papers.
+site_url: https://marcpinet.github.io/citracer
+repo_url: https://github.com/marcpinet/citracer
+repo_name: marcpinet/citracer
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue grey
+      accent: orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Usage:
+    - Quick start: usage/quick-start.md
+    - CLI reference: usage/cli-reference.md
+    - Semantic matching: usage/semantic.md
+    - Reverse trace: usage/reverse.md
+    - Literature monitoring: usage/diff.md
+  - Output:
+    - Visualization: output/visualization.md
+    - Analytics: output/analytics.md
+    - Export formats: output/export.md
+  - How it works: how-it-works.md
+  - Limitations: limitations.md
+  - Development: development.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - tables
+  - attr_list
+  - md_in_html

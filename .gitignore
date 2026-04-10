@@ -2,6 +2,7 @@
 cache/
 output/
 test_data/
+site/
 
 # --- Secrets / env ---
 .env
