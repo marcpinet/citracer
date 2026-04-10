@@ -14,6 +14,9 @@ Given a source PDF and a keyword, citracer parses the bibliography with GROBID, 
 
 ![citracer interactive graph](https://raw.githubusercontent.com/marcpinet/citracer/main/readme_data/graph.png)
 
+> [!TIP]
+> **Full documentation available at [marcpinet.fr/citracer](https://marcpinet.fr/citracer/)** with detailed guides for each feature, export formats, and the pipeline internals.
+
 ## ⚙️ Installation
 
 Requirements: Python 3.10+ and Docker.
@@ -46,7 +49,8 @@ docker run --rm -p 8070:8070 lfoppiano/grobid:0.9.0
 
 GROBID must be reachable on `http://localhost:8070`. Verify with `curl http://localhost:8070/api/isalive`.
 
-A [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key) is optional but recommended. Without one the public endpoint is throttled to ~3.5s between calls. With a key, the throttle drops to ~1.1s (safely under the 1 req/sec limit advertised by Semantic Scholar).
+> [!IMPORTANT]
+> A [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key) is optional but recommended. Without one the public endpoint is throttled to ~3.5s between calls. With a key, the throttle drops to ~1.1s. Get a free key at [semanticscholar.org/product/api](https://www.semanticscholar.org/product/api#api-key).
 
 The key can be provided in three ways, in order of precedence:
 
@@ -69,6 +73,9 @@ The key can be provided in three ways, in order of precedence:
    The `.env` file is git-ignored.
 
 If none of these are set, the unauthenticated public endpoint is used as fallback (much slower, frequent 429 backoffs).
+
+> [!NOTE]
+> Without an API key, deep traces (depth 4+) can take 10-20 minutes due to rate limiting. With a key, the same trace typically completes 3-5x faster.
 
 An **OpenAlex email** is optional but recommended when using `--enrich`. It activates the [polite pool](https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication) (10 req/s vs 1 req/s anonymous). Set it once via:
 
@@ -272,7 +279,10 @@ The forward algorithm walks DOWN from a root paper into its bibliography. `--rev
 
 The key trick is that Semantic Scholar's `/paper/{id}/citations` endpoint returns a `contexts` field for each citing paper: an array of 1-2 sentence snippets around every place that paper cites the source. We apply the same morphological keyword regex to those snippets locally. A paper whose citation contexts don't contain the keyword is rejected without downloading anything. A paper with a matching context is added to the graph with the snippet as its `keyword_hits`, plus its title/authors/year/arxiv-id from S2 metadata. No GROBID call, no arXiv download. (Note: `--semantic` is not available in reverse mode - the snippets are too short for reliable embedding-based matching.)
 
-For a paper with 2000+ citations, this runs in ~10-30 seconds and typically surfaces 20-100 relevant papers, depending on how specific the keyword is. Deep recursion (`--depth > 1`) is supported but capped per-level by `--reverse-limit` because each level can multiply the number of S2 calls.
+For a paper with 2000+ citations, this runs in ~10-30 seconds and typically surfaces 20-100 relevant papers, depending on how specific the keyword is.
+
+> [!WARNING]
+> Deep recursion (`--depth > 2`) in reverse mode can expand combinatorially. Each level multiplies the number of S2 API calls. Use `--reverse-limit` to cap growth.
 
 Caveats: reverse trace depends entirely on S2 being reachable and having indexed the citation contexts (they come from S2's own PDF processing pipeline). Papers S2 doesn't know about won't appear. The resulting graph has no cross-graph bibliographic links because we never parse the citing papers' bibliographies.
 
@@ -289,11 +299,10 @@ citracer --pdf paper.pdf --keyword "channel-independent" --semantic
 
 Semantic hits appear in the info panel with a purple **SEM** badge and the note *"conceptual match - keyword not literally present"*, so the user can distinguish them from regex hits at a glance. The header also shows a breakdown (e.g. "7 keyword hit(s) (5 regex + 2 semantic)").
 
-The model is loaded once and cached in memory for the duration of the trace. Sentence embeddings are batch-encoded (~50-200ms per paper on CPU), so the overhead is small relative to the GROBID parse and API calls that dominate trace time.
+`--semantic-model NAME` switches to a different model (e.g. `all-MiniLM-L6-v2` for a lighter 80MB alternative). `--semantic-threshold T` tunes the similarity cutoff. Both flags imply `--semantic`.
 
-`--semantic-model NAME` switches to a different model (e.g. `all-MiniLM-L6-v2` for a lighter 80MB alternative, `paraphrase-MiniLM-L3-v2` for faster inference). `--semantic-threshold T` tunes the similarity cutoff - lower values increase recall at the cost of more false positives. Both flags imply `--semantic`.
-
-Semantic matching is not available in reverse trace mode (`--reverse`), which filters on S2 citation context snippets via regex only.
+> [!CAUTION]
+> `--semantic` adds ~500MB of dependencies (sentence-transformers + PyTorch). The first model load takes 5-10 seconds, then stays cached in memory. Not available in reverse trace mode.
 
 ### Literature monitoring (`--diff` / `--since`)
 
@@ -315,7 +324,8 @@ Month-level precision uses the `publicationDate` field from Semantic Scholar (`Y
 
 Both `is_new` flags (on nodes and edges) are included in JSON and GraphML exports, so downstream scripts can consume the diff without re-running citracer.
 
-**Known limitation:** `paper_id` is not fully stable across runs. If a paper was resolved by title hash in one run and by DOI in another, it may falsely appear as "new". Re-running both traces from the same cache directory minimizes this.
+> [!WARNING]
+> `paper_id` is not fully stable across runs. If a paper was resolved by title hash in one run and by DOI in another, it may falsely appear as "new". Re-running both traces from the same cache directory minimizes this.
 
 ## 📁 Project structure
 
