@@ -179,6 +179,10 @@
     <label for="citracer-spread">spread</label>
     <input type="range" id="citracer-spread" min="0.3" max="3" step="0.05" value="1">
   </div>
+  <div class="citracer-control" style="flex-direction:row;align-items:center;gap:6px;">
+    <input type="checkbox" id="citracer-curved" checked>
+    <label for="citracer-curved" style="min-width:0;">curved edges</label>
+  </div>
   <div class="citracer-control">
     <label for="citracer-search">search</label>
     <input type="search" id="citracer-search" placeholder="title, author…" autocomplete="off">
@@ -259,6 +263,7 @@
           layout: currentLayout,
           sizeMode: currentSizeMode,
           spread: currentSpread,
+          curvedEdges: curvedEdges,
         };
         localStorage.setItem(STATE_KEY, JSON.stringify(state));
         const reset = document.getElementById('citracer-reset');
@@ -328,6 +333,11 @@
       const slider = document.getElementById('citracer-spread');
       if (slider) slider.value = String(state.spread);
     }
+    if (typeof state.curvedEdges === 'boolean') {
+      curvedEdges = state.curvedEdges;
+      const cb = document.getElementById('citracer-curved');
+      if (cb) cb.checked = curvedEdges;
+    }
 
     // Restored positions are applied in tryAttach() (needs the network)
   }
@@ -337,6 +347,7 @@
   let currentLayout = DEFAULT_LAYOUT;
   let currentSizeMode = "in-degree";
   let currentSpread = 1.0;  // multiplier applied on top of the layout's natural spacing
+  let curvedEdges = true;   // whether edges use smooth curves or straight lines
 
   // Compile one regex per keyword so we can colour matches individually.
   const KEYWORD_REGEXES = KEYWORD_SPECS.map(s => {
@@ -433,6 +444,22 @@
     return Math.min(base, 80);
   }
 
+  // Original smooth settings per edge type, used when curvedEdges is on.
+  const SMOOTH_PRIMARY   = {type: "cubicBezier", forceDirection: "vertical", roundness: 0.4};
+  const SMOOTH_SECONDARY = {type: "curvedCW", roundness: 0.25};
+
+  function _smoothForEdge(e) {
+    if (!curvedEdges) return false;
+    return edgeType(e) === "secondary" ? SMOOTH_SECONDARY : SMOOTH_PRIMARY;
+  }
+
+  function applyCurvedEdges() {
+    if (typeof edges === 'undefined') return;
+    const updates = [];
+    edges.forEach(e => { updates.push({ id: e.id, smooth: _smoothForEdge(e) }); });
+    edges.update(updates);
+  }
+
   function applyFilter() {
     if (typeof nodes === 'undefined' || typeof edges === 'undefined') return;
     // Nodes: hidden if status filter OR manual right-click hide
@@ -458,7 +485,9 @@
         banner.textContent = 'show ' + manuallyHidden.size + ' manually hidden';
       }
     }
-    // Edges: hide by edge type, AND respect node visibility
+    // Edges: hide by edge type, AND respect node visibility.
+    // Also enforce the current smooth/straight preference so toggling
+    // nodes doesn't cause edges to flicker between curved and straight.
     const edgeUpdates = [];
     const inDegree = {};
     nodes.forEach(n => { inDegree[n.id] = 0; });
@@ -466,7 +495,7 @@
       const typeHidden = disabledEdgeTypes.has(edgeType(e));
       const endpointHidden = nodeHidden[e.from] || nodeHidden[e.to];
       const hidden = typeHidden || endpointHidden;
-      edgeUpdates.push({ id: e.id, hidden: hidden });
+      edgeUpdates.push({ id: e.id, hidden: hidden, smooth: _smoothForEdge(e) });
       if (!hidden) {
         inDegree[e.to] = (inDegree[e.to] || 0) + 1;
       }
@@ -845,6 +874,16 @@
     });
   }
 
+  // Curved edges checkbox
+  const curvedCheckbox = document.getElementById('citracer-curved');
+  if (curvedCheckbox) {
+    curvedCheckbox.addEventListener('change', (ev) => {
+      curvedEdges = ev.target.checked;
+      applyCurvedEdges();
+      saveState();
+    });
+  }
+
   // Spread slider: rescales node positions around the centroid. Using
   // 'input' makes it live during the drag.
   const spreadSlider = document.getElementById('citracer-spread');
@@ -1140,6 +1179,10 @@
       } else {
         switchLayout(currentLayout);
       }
+
+      // Enforce edge smooth/straight setting (especially important when
+      // restoring state where the user had straight edges enabled).
+      applyCurvedEdges();
 
       // Live update on hover (ignored while pinned)
       network.on('hoverNode', params => {
