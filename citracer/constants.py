@@ -34,12 +34,17 @@ GROBID_DEFAULT_WORKERS: int = 4
 KEYWORD_MORPHO_MIN_LEN: int = 4
 
 #: Default sentence-transformer model for --semantic matching.
-SEMANTIC_DEFAULT_MODEL: str = "all-MiniLM-L6-v2"
+#: all-mpnet-base-v2 (420MB) outperforms all-MiniLM-L6-v2 (80MB)
+#: on academic text: F1=0.93 vs 0.86 at threshold 0.30, with zero
+#: false positives on our benchmark. The load-time cost (~11s on
+#: first call) is one-time and negligible for deep traces.
+SEMANTIC_DEFAULT_MODEL: str = "all-mpnet-base-v2"
 
-#: Cosine similarity threshold for semantic matching. Deliberately
-#: permissive — the regex pass already provides precision, so the
-#: semantic pass is a recall booster. Range: 0.0-1.0.
-SEMANTIC_SIMILARITY_THRESHOLD: float = 0.45
+#: Cosine similarity threshold for semantic matching. Benchmarked
+#: at 0.30 for best F1 on academic citation text: catches 7/8
+#: conceptual matches with zero false positives. The regex pass
+#: already provides precision, so the semantic pass can be permissive.
+SEMANTIC_SIMILARITY_THRESHOLD: float = 0.30
 
 
 # ---------------------------------------------------------------------------
