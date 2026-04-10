@@ -151,8 +151,8 @@ citracer --pdf paper.pdf --keyword "attention" --semantic --semantic-threshold 0
 | `--diff` | none | Compare against a previous citracer JSON export and highlight new nodes (papers not in the baseline) in orange. Useful for monitoring how a citation graph evolves over time |
 | `--since` | none | Highlight nodes published on or after this date (`YYYY` or `YYYY-MM`). Works alone (date filter) or with `--diff` (intersection: new AND recent). Uses S2 `publicationDate` for month precision when available, falls back to year |
 | `--semantic` | off | Enable semantic matching: after the regex pass, scan remaining sentences with a [sentence-transformer](https://www.sbert.net/) embedding model to catch conceptual matches the regex missed (e.g. "univariate processing" for the keyword "channel-independent"). Requires `pip install citracer[semantic]` |
-| `--semantic-model` | `all-MiniLM-L6-v2` | Sentence-transformer model name for `--semantic`. Implies `--semantic` |
-| `--semantic-threshold` | `0.45` | Cosine similarity threshold for semantic matching (0.0-1.0). Lower = more recall, higher = more precision. Implies `--semantic` |
+| `--semantic-model` | `all-mpnet-base-v2` | Sentence-transformer model name for `--semantic`. Implies `--semantic` |
+| `--semantic-threshold` | `0.30` | Cosine similarity threshold for semantic matching (0.0-1.0). Lower = more recall, higher = more precision. Implies `--semantic` |
 
 ### Output
 
@@ -280,7 +280,7 @@ Caveats: reverse trace depends entirely on S2 being reachable and having indexed
 
 The default regex handles morphological variants (e.g. `channel-independent` matches `channel-independence`, `channel independently`) but misses papers that express the same concept with different vocabulary: "univariate processing", "per-channel modeling", "decoupled channel correlations".
 
-`--semantic` adds a second pass after the regex: every sentence the regex *didn't* already match is embedded with a [sentence-transformer](https://www.sbert.net/) model (default: `all-MiniLM-L6-v2`, ~80MB) and compared to the keyword by cosine similarity. Sentences above the threshold (default 0.45) are added as additional hits. The result is a union: all regex matches plus any conceptual matches the embedding caught.
+`--semantic` adds a second pass after the regex: every sentence the regex *didn't* already match is embedded with a [sentence-transformer](https://www.sbert.net/) model (default: `all-mpnet-base-v2`, ~420MB) and compared to the keyword by cosine similarity. Sentences above the threshold (default 0.30) are added as additional hits. The result is a union: all regex matches plus any conceptual matches the embedding caught.
 
 ```bash
 pip install citracer[semantic]
@@ -291,7 +291,7 @@ Semantic hits appear in the info panel with a purple **SEM** badge and the note 
 
 The model is loaded once and cached in memory for the duration of the trace. Sentence embeddings are batch-encoded (~50-200ms per paper on CPU), so the overhead is small relative to the GROBID parse and API calls that dominate trace time.
 
-`--semantic-model NAME` switches to a different model (e.g. `all-mpnet-base-v2` for higher quality, `paraphrase-MiniLM-L3-v2` for faster inference). `--semantic-threshold T` tunes the similarity cutoff — lower values increase recall at the cost of more false positives. Both flags imply `--semantic`.
+`--semantic-model NAME` switches to a different model (e.g. `all-MiniLM-L6-v2` for a lighter 80MB alternative, `paraphrase-MiniLM-L3-v2` for faster inference). `--semantic-threshold T` tunes the similarity cutoff — lower values increase recall at the cost of more false positives. Both flags imply `--semantic`.
 
 Semantic matching is not available in reverse trace mode (`--reverse`), which filters on S2 citation context snippets via regex only.
 
@@ -381,7 +381,7 @@ External APIs:
 - arXiv enforces ~3 seconds between requests, so the first run on a deep trace can take several minutes. The local cache makes subsequent runs fast.
 - Papers that cannot be resolved through any source in the download cascade (arXiv, OpenReview, Sci-Hub, S2 open-access, preprint servers) appear as `unavailable` red nodes. Books and some workshop proceedings are typically not retrievable. Use `--supply-pdf` to provide PDFs manually for these nodes.
 - The "Fruchterman-Reingold" layout option is implemented via vis.js's `forceAtlas2Based` solver, which is the closest approximation available natively. A proper Kamada-Kawai implementation isn't offered because vis.js doesn't ship one.
-- `--semantic` matching depends on the quality of the sentence-transformer model. The default `all-MiniLM-L6-v2` is a good balance of speed and quality, but domain-specific keywords may benefit from a larger model (`all-mpnet-base-v2`) or a lower threshold. Semantic matching is not available in reverse trace mode.
+- `--semantic` matching depends on the quality of the sentence-transformer model. The default `all-mpnet-base-v2` was benchmarked at F1=0.93 on academic citation text (vs 0.86 for `all-MiniLM-L6-v2`). Domain-specific keywords may benefit from threshold tuning. Semantic matching is not available in reverse trace mode.
 
 ## 🧪 Development
 

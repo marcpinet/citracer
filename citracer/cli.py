@@ -170,7 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="NAME",
         help="Sentence-transformer model for --semantic "
-             "(default: all-MiniLM-L6-v2). Implies --semantic.",
+             "(default: all-mpnet-base-v2). Implies --semantic.",
     )
     p.add_argument(
         "--semantic-threshold",
@@ -178,7 +178,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="T",
         help="Cosine similarity threshold for semantic matching "
-             "(default: 0.45, range 0.0-1.0). Implies --semantic.",
+             "(default: 0.30, range 0.0-1.0). Implies --semantic.",
     )
     p.add_argument("--no-open", action="store_true", help="Do not open the result in a browser.")
     p.add_argument("-v", "--verbose", action="store_true")
