@@ -1,6 +1,6 @@
 # --- citracer ---
 cache/
-output/
+/output/
 test_data/
 site/
 
