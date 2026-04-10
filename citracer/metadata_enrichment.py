@@ -164,9 +164,11 @@ class MetadataEnricher:
 
         work = results[0]
         # Verify title match with fuzzy matching
-        work_title = work.get("title") or ""
-        score = fuzz.token_set_ratio(
-            normalize_title(title), normalize_title(work_title),
+        target = normalize_title(title)
+        candidate = normalize_title(work.get("title") or "")
+        score = min(
+            fuzz.token_set_ratio(target, candidate),
+            fuzz.token_sort_ratio(target, candidate),
         )
         if score < 85:
             logger.debug(

@@ -108,10 +108,14 @@ def _find_matching_bib(
     best: BibEntry | None = None
     best_score = 0.0
     for bib in bib_dict.values():
-        candidate = bib.title or bib.raw
-        if not candidate:
+        raw = bib.title or bib.raw
+        if not raw:
             continue
-        score = fuzz.token_set_ratio(target, normalize_title(candidate))
+        candidate = normalize_title(raw)
+        score = min(
+            fuzz.token_set_ratio(target, candidate),
+            fuzz.token_sort_ratio(target, candidate),
+        )
         if score > best_score:
             best_score = score
             best = bib
