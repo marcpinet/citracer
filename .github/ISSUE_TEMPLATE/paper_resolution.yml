@@ -1,0 +1,34 @@
+name: Paper resolution issue
+description: A paper was incorrectly matched, not found, or linked to the wrong source
+labels: ["resolution"]
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Issue type
+      options:
+        - Wrong paper downloaded (fuzzy match false positive)
+        - Paper not found (should be resolvable)
+        - Wrong arXiv/DOI/URL linked
+        - Semantic match false positive (irrelevant SEM hit)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Details
+      placeholder: |
+        Expected paper: "Actual Paper Title" (DOI: 10.xxx)
+        Got instead: "Wrong Paper Title" (arXiv: xxxx.xxxxx)
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command used
+      placeholder: citracer --pdf paper.pdf --keyword "..." --depth 3
+  - type: input
+    id: version
+    attributes:
+      label: citracer version
+      placeholder: "1.4.0"
