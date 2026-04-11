@@ -6,7 +6,7 @@ https://github.com/user-attachments/assets/36855b62-a9ab-4404-90c3-9ac7f418899c
 
 ## 📝 Description
 
-Trace citation chains for any keyword - or concept - across research papers.
+Trace citation chains for any keyword or concept across research papers.
 
 Given a source PDF and a keyword, citracer parses the bibliography with GROBID, finds every occurrence of the keyword in the body, identifies the references cited near each occurrence, downloads those papers, and recursively walks the resulting citation graph. The output is an interactive HTML page. With `--semantic`, matching goes beyond literal keywords: a sentence-transformer embedding model catches passages that express the same concept with different vocabulary (e.g. "univariate processing" matches a trace for "channel-independent").
 
@@ -252,7 +252,7 @@ This allows anyone receiving a citracer graph to re-run the trace with identical
 
 2. **Inline ref recovery.** GROBID occasionally misses narrative citations like `DLinear Zeng et al. (2023)`, especially when the author name isn't preceded by a parenthesis. A supplementary pass scans the text for canonical author-year patterns (`Surname et al. (Year)`, `Surname & Other (Year)`, `Surname (Year)`) and adds them as inline refs whenever the `(surname, year)` signature matches a unique bibliography entry. In typical ML papers this recovers dozens of refs per document.
 
-3. **Keyword matching (regex + optional semantic).** The keyword is first compiled to a flexible regex that handles morphological variants (e.g. `channel-independent` matches `channel-independence`, `channel independently`, `channelindependence`). The body is segmented into sentences with [pysbd](https://github.com/nipunsadvilkar/pySBD), and each occurrence of the keyword is associated with the references cited in the same sentence or the immediately following one. When `--semantic` is enabled, a second pass scans every sentence the regex *didn't* match using a sentence-transformer embedding model: sentences whose embedding is close enough to the keyword (cosine similarity above the threshold) are added as additional hits. This catches conceptual matches where the idea is expressed with entirely different vocabulary - for example, tracing "channel-independent" also surfaces passages about "decoupled cross-channel correlations" or "per-variate processing". Regex hits and semantic hits are unioned, so `--semantic` only adds recall without losing any existing matches.
+3. **Keyword matching (regex + optional semantic).** The keyword is first compiled to a flexible regex that handles morphological variants (e.g. `channel-independent` matches `channel-independence`, `channel independently`, `channelindependence`). The body is segmented into sentences with [pysbd](https://github.com/nipunsadvilkar/pySBD), and each occurrence of the keyword is associated with the references cited in the same sentence or the immediately following one. When `--semantic` is enabled, a second pass scans every sentence the regex *didn't* match using a sentence-transformer embedding model: sentences whose embedding is close enough to the keyword (cosine similarity above the threshold) are added as additional hits. This catches conceptual matches where the idea is expressed with entirely different vocabulary (for example, tracing "channel-independent" also surfaces passages about "decoupled cross-channel correlations" or "per-variate processing"). Regex hits and semantic hits are unioned, so `--semantic` only adds recall without losing any existing matches.
 
 4. **Reference resolution.** Each cited paper is resolved through the following cascade:
    1. If GROBID extracted a DOI or arXiv ID, use it directly.
@@ -269,7 +269,7 @@ This allows anyone receiving a citracer graph to re-run the trace with identical
 
 6. **Cross-graph bibliographic links.** After the recursive trace is complete, a post-processing pass scans every parsed paper's bibliography against every other node in the graph and adds dashed "bibliographic link" edges for pairs that cite each other but not in the keyword's neighborhood. Matching is exact on DOI/arXiv IDs and fuzzy (rapidfuzz, threshold 88) on titles. No external API calls are needed: everything runs on the already-in-memory graph, so the cost is negligible.
 
-7. **Bibliometric analytics.** After the trace completes, citracer computes per-node centrality metrics (PageRank, betweenness) and graph-wide statistics (density, connected components, keyword density timeline) using [networkx](https://networkx.org/). Pivot papers - the earliest keyword-matched paper in each connected component, plus high-betweenness nodes with the keyword - are automatically flagged. A reproducibility manifest (`manifest.json`) is written alongside the graph, encoding the full trace parameters, environment, and results.
+7. **Bibliometric analytics.** After the trace completes, citracer computes per-node centrality metrics (PageRank, betweenness) and graph-wide statistics (density, connected components, keyword density timeline) using [networkx](https://networkx.org/). Pivot papers (the earliest keyword-matched paper in each connected component, plus high-betweenness nodes with the keyword) are automatically flagged. A reproducibility manifest (`manifest.json`) is written alongside the graph, encoding the full trace parameters, environment, and results.
 
 8. **Rendering.** The graph is serialized to an interactive HTML page using [pyvis](https://pyvis.readthedocs.io/), with a custom overlay providing the layout/size/spread controls, the legend filters, the side info panel, keyword highlighting, and KaTeX math.
 
@@ -277,7 +277,7 @@ This allows anyone receiving a citracer graph to re-run the trace with identical
 
 The forward algorithm walks DOWN from a root paper into its bibliography. `--reverse` walks UP: "who cites this paper, and which of them mention the keyword in their citation context?".
 
-The key trick is that Semantic Scholar's `/paper/{id}/citations` endpoint returns a `contexts` field for each citing paper: an array of 1-2 sentence snippets around every place that paper cites the source. We apply the same morphological keyword regex to those snippets locally. A paper whose citation contexts don't contain the keyword is rejected without downloading anything. A paper with a matching context is added to the graph with the snippet as its `keyword_hits`, plus its title/authors/year/arxiv-id from S2 metadata. No GROBID call, no arXiv download. (Note: `--semantic` is not available in reverse mode - the snippets are too short for reliable embedding-based matching.)
+The key trick is that Semantic Scholar's `/paper/{id}/citations` endpoint returns a `contexts` field for each citing paper: an array of 1-2 sentence snippets around every place that paper cites the source. We apply the same morphological keyword regex to those snippets locally. A paper whose citation contexts don't contain the keyword is rejected without downloading anything. A paper with a matching context is added to the graph with the snippet as its `keyword_hits`, plus its title/authors/year/arxiv-id from S2 metadata. No GROBID call, no arXiv download. (`--semantic` is not available in reverse mode because the snippets are too short for reliable embedding-based matching.)
 
 For a paper with 2000+ citations, this runs in ~10-30 seconds and typically surfaces 20-100 relevant papers, depending on how specific the keyword is.
 
@@ -297,7 +297,7 @@ pip install citracer[semantic]
 citracer --pdf paper.pdf --keyword "channel-independent" --semantic
 ```
 
-Semantic hits appear in the info panel with a purple **SEM** badge and the note *"conceptual match - keyword not literally present"*, so the user can distinguish them from regex hits at a glance. The header also shows a breakdown (e.g. "7 keyword hit(s) (5 regex + 2 semantic)").
+Semantic hits appear in the info panel with a purple **SEM** badge labeled *"conceptual match"*, so the user can distinguish them from regex hits at a glance. The header also shows a breakdown (e.g. "7 keyword hit(s) (5 regex + 2 semantic)").
 
 `--semantic-model NAME` switches to a different model (e.g. `all-MiniLM-L6-v2` for a lighter 80MB alternative). `--semantic-threshold T` tunes the similarity cutoff. Both flags imply `--semantic`.
 
@@ -316,7 +316,7 @@ citracer --pdf paper.pdf --keyword "attention" --depth 3 --export baseline.json
 citracer --pdf paper.pdf --keyword "attention" --depth 3 --diff baseline.json
 ```
 
-Nodes that weren't in `baseline.json` are colored **orange** and labeled `NEW` in the info panel. Their original status (analyzed, no match, unavailable) is preserved - the orange overlay is purely visual. The legend gains a clickable **new (since last run)** row to toggle them on/off.
+Nodes that weren't in `baseline.json` are colored **orange** and labeled `NEW` in the info panel. Their original status (analyzed, no match, unavailable) is preserved; the orange overlay is purely visual. The legend gains a clickable **new (since last run)** row to toggle them on/off.
 
 `--since YYYY` or `--since YYYY-MM` highlights nodes published on or after a date. When combined with `--diff`, both conditions must be met (intersection): the paper must be absent from the baseline **and** published after the given date.
 

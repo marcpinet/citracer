@@ -29,7 +29,7 @@ None of these contain the literal keyword, but they all describe the same concep
 In the info panel, semantic hits are distinguished from regex hits:
 
 - **Regex hits**: keyword is highlighted in yellow in the passage
-- **Semantic hits**: prefixed with a purple **SEM** badge and the note *"conceptual match - keyword not literally present"*
+- **Semantic hits**: prefixed with a purple **SEM** badge labeled *"conceptual match"* with the similarity score
 - **Header**: shows the breakdown, e.g. *"7 keyword hit(s) (5 regex + 2 semantic)"*
 
 ## Model and threshold
