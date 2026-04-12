@@ -36,6 +36,7 @@ from .constants import (
     OPENREVIEW_FUZZY_MATCH_THRESHOLD,
     OPENREVIEW_TIMEOUT_SECONDS,
     PDF_DOWNLOAD_TIMEOUT_SECONDS,
+    SEARCH_YEAR_TOLERANCE,
     S2_429_BACKOFF_DELAYS,
     S2_429_CIRCUIT_BREAKER_THRESHOLD,
     S2_CIRCUIT_BREAKER_COOLDOWN_SECONDS,
@@ -255,7 +256,7 @@ class ReferenceResolver:
         #    by title first — much faster than S2 when no API key, and the
         #    arxiv API also returns title/abstract so we get enrichment too.
         if not meta.get("arxiv_id") and meta.get("title"):
-            arx = self._arxiv_search_by_title(meta["title"])
+            arx = self._arxiv_search_by_title(meta["title"], bib_year=bib.year)
             if arx:
                 for k, v in arx.items():
                     if v and not meta.get(k):
@@ -394,7 +395,7 @@ class ReferenceResolver:
         if meta is None and bib.arxiv_id:
             meta = self._s2_by_id(f"ARXIV:{bib.arxiv_id}")
         if meta is None and bib.title:
-            meta = self._s2_search(bib.title)
+            meta = self._s2_search(bib.title, bib_year=bib.year)
 
         # Note: only cache positive hits for S2 — the throttle is expensive
         # and the negative case is rare enough that we'd rather retry it.
@@ -457,7 +458,7 @@ class ReferenceResolver:
         data = self._s2_get(url, f"by-id {id_str}")
         return self._normalize_s2(data) if data else None  # type: ignore[arg-type]
 
-    def _s2_search(self, title: str) -> NormalizedMeta | None:
+    def _s2_search(self, title: str, bib_year: int | None = None) -> NormalizedMeta | None:
         q = re.sub(r"\s+", " ", title).strip()[:300]
         url = f"{S2_BASE}/paper/search?query={requests.utils.quote(q)}&limit=3&fields={S2_FIELDS}"
         data = self._s2_get(url, f"search {q[:60]!r}")
@@ -472,6 +473,10 @@ class ReferenceResolver:
         best = None
         best_score = 0.0
         for item in items:
+            # Year cross-check: skip results too far from the bib year
+            if bib_year is not None and item.get("year"):
+                if abs(item["year"] - bib_year) > SEARCH_YEAR_TOLERANCE:
+                    continue
             candidate = normalize_title(item.get("title") or "")
             score = min(
                 fuzz.token_set_ratio(target, candidate),
@@ -488,7 +493,7 @@ class ReferenceResolver:
 
     # ---------- arXiv title search fallback ----------
 
-    def _arxiv_search_by_title(self, title: str) -> NormalizedMeta | None:
+    def _arxiv_search_by_title(self, title: str, bib_year: int | None = None) -> NormalizedMeta | None:
         """Search arxiv.org by title.
 
         Two strategies, in order:
@@ -529,10 +534,17 @@ class ReferenceResolver:
 
         if best is None or best_score < TITLE_FUZZY_MATCH_THRESHOLD:
             logger.debug("arxiv search: no good match for %r (best=%s)", title[:60], best_score)
-            # Do NOT cache negatives — arxiv/openreview search results are
-            # fragile (service blips, indexing latency, our own bug fixes).
-            # We only cache positive hits, which are deterministic.
             return None
+
+        # Year cross-check: reject if the result's year is too far from the bib entry's year
+        if bib_year is not None and getattr(best, 'published', None):
+            result_year = best.published.year
+            if abs(result_year - bib_year) > SEARCH_YEAR_TOLERANCE:
+                logger.debug(
+                    "arxiv search: year mismatch for %r (bib=%d, result=%d, gap=%d)",
+                    title[:60], bib_year, result_year, abs(result_year - bib_year),
+                )
+                return None
 
         arxiv_id = normalize_arxiv_id(best.get_short_id())
         out: NormalizedMeta = {

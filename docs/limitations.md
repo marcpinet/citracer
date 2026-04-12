@@ -8,7 +8,7 @@
 
 - **arXiv rate limits**: arXiv enforces ~3 seconds between requests. The first run on a deep trace can take several minutes. Subsequent runs are fast thanks to the local cache.
 
-- **Unavailable papers**: Papers not on arXiv, OpenReview, Sci-Hub, S2 open-access, or any supported preprint server appear as red `unavailable` nodes. Books and some workshop proceedings are typically not retrievable. Use `--supply-pdf` to provide PDFs manually.
+- **Unavailable papers**: Papers not on arXiv, OpenReview, Sci-Hub, S2 open-access, or any supported preprint server appear as red `unavailable` nodes. Books and some workshop proceedings are typically not retrievable. Use `--supply-pdf` to provide PDFs manually (local path or URL).
 
 - **Fruchterman-Reingold layout**: Implemented via vis.js's `forceAtlas2Based` solver, which is the closest available approximation. A proper Kamada-Kawai implementation isn't offered because vis.js doesn't ship one.
 

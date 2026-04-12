@@ -25,7 +25,7 @@
 | `--reverse-limit` | `500` | Max citations fetched per level in reverse mode |
 | `--enrich` | off | Enrich unavailable nodes with metadata via [OpenAlex](https://openalex.org/) |
 | `--email` | none | Email for OpenAlex polite pool (10 req/s). Implies `--enrich` |
-| `--supply-pdf` | none | Supply a local PDF for a node: `ID=PATH`. Repeat for multiple |
+| `--supply-pdf` | none | Supply a PDF for a node as local path or URL: `ID=PATH` or `ID=URL`. Repeat for multiple |
 | `--diff` | none | [Diff](diff.md) against a previous JSON export, highlighting new nodes in orange |
 | `--since` | none | Highlight nodes published on or after `YYYY` or `YYYY-MM`. Works alone or with `--diff` |
 | `--semantic` | off | Enable [semantic matching](semantic.md). Requires `pip install citracer[semantic]` |

@@ -241,7 +241,13 @@
   <div class="ctx-item" data-action="hide">Hide</div>
   <div class="ctx-item" data-action="pin">Pin</div>
   <div class="ctx-sep"></div>
+  <div class="ctx-item" data-action="supply" style="display:none;">Supply PDF...</div>
   <div class="ctx-item" data-action="open">Open link ↗</div>
+</div>
+<div id="citracer-supply-banner" style="display:none;position:fixed;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(30,30,30,0.95);color:#fff;padding:10px 16px;border-radius:8px;font-size:12px;font-family:sans-serif;z-index:10000;max-width:90vw;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+  <div style="margin-bottom:6px;font-weight:bold;">📋 Add to your next citracer run:</div>
+  <code id="citracer-supply-cmd" style="display:block;background:#222;padding:8px;border-radius:4px;font-size:11px;overflow-x:auto;white-space:pre;cursor:pointer;" title="Click to copy"></code>
+  <div style="margin-top:4px;color:#aaa;font-size:10px;">Click the command to copy. <span id="citracer-supply-close" style="color:#6cf;cursor:pointer;text-decoration:underline;">Dismiss</span></div>
 </div>
 
 <script>
@@ -725,13 +731,26 @@
   }
 
   function _sugiyamaLayoutConfig(levelField) {
+    // Adapt spacing to graph size so nodes don't overlap on crowded levels
+    const n = _nodeCount();
+    let nodeSpacing, treeSpacing, levelSeparation;
+    if (n <= 20) {
+      nodeSpacing = 220; treeSpacing = 280; levelSeparation = 220;
+    } else if (n <= 60) {
+      nodeSpacing = 180; treeSpacing = 240; levelSeparation = 200;
+    } else if (n <= 150) {
+      nodeSpacing = 140; treeSpacing = 200; levelSeparation = 180;
+    } else {
+      nodeSpacing = 100; treeSpacing = 160; levelSeparation = 160;
+    }
     return {
       levelField: levelField,
       layout: {
         hierarchical: {
           enabled: true, direction: "UD", sortMethod: "directed",
-          shakeTowards: "leaves", levelSeparation: 220, nodeSpacing: 220,
-          treeSpacing: 280, blockShifting: true, edgeMinimization: true,
+          shakeTowards: "leaves", levelSeparation: levelSeparation,
+          nodeSpacing: nodeSpacing, treeSpacing: treeSpacing,
+          blockShifting: true, edgeMinimization: true,
           parentCentralization: true,
         }
       },
@@ -840,6 +859,29 @@
     if (mode.startsWith("sugiyama")) {
       setTimeout(() => {
         network.setOptions({ layout: { hierarchical: { enabled: false } } });
+        // Fix overlapping nodes: vis.js sometimes stacks nodes at the
+        // exact same position when multiple nodes share a level. Detect
+        // collisions and spread them apart horizontally.
+        const positions = network.getPositions();
+        const byPos = {};
+        for (const id in positions) {
+          const p = positions[id];
+          const key = Math.round(p.x) + ',' + Math.round(p.y);
+          if (!byPos[key]) byPos[key] = [];
+          byPos[key].push(id);
+        }
+        const fixUpdates = [];
+        for (const key in byPos) {
+          const group = byPos[key];
+          if (group.length <= 1) continue;
+          const p = positions[group[0]];
+          const spacing = 120;
+          const startX = p.x - (group.length - 1) * spacing / 2;
+          group.forEach((id, i) => {
+            fixUpdates.push({ id: id, x: startX + i * spacing, y: p.y });
+          });
+        }
+        if (fixUpdates.length) nodes.update(fixUpdates);
         network.fit();
       }, 120);
     } else {
@@ -1532,6 +1574,9 @@
     // Toggle the "Open link" row — hide it when there's no URL
     const openItem = menu.querySelector('[data-action="open"]');
     if (openItem) openItem.style.display = d.url ? '' : 'none';
+    // Toggle "Supply PDF" — only for unavailable nodes
+    const supplyItem = menu.querySelector('[data-action="supply"]');
+    if (supplyItem) supplyItem.style.display = d.status === 'unavailable' ? '' : 'none';
     // Toggle Pin label
     const pinItem = menu.querySelector('[data-action="pin"]');
     if (pinItem) pinItem.textContent = (pinnedNodeId === nodeId) ? 'Unpin' : 'Pin';
@@ -1574,9 +1619,54 @@
       saveState();
     } else if (action === 'open') {
       if (d.url) window.open(d.url, '_blank');
+    } else if (action === 'supply') {
+      const input = prompt(
+        'Enter a local path or URL to the PDF for:\n'
+        + (d.title || nodeId) + '\n\n'
+        + 'Example: ~/papers/paper.pdf or https://example.com/paper.pdf'
+      );
+      if (input && input.trim()) {
+        _supplyPdfEntries.push({ id: nodeId, path: input.trim() });
+        _updateSupplyBanner();
+      }
     }
     closeContextMenu();
   });
+
+  // --- Supply PDF banner ---
+  const _supplyPdfEntries = [];
+
+  function _updateSupplyBanner() {
+    const banner = document.getElementById('citracer-supply-banner');
+    const cmd = document.getElementById('citracer-supply-cmd');
+    if (!banner || !cmd || !_supplyPdfEntries.length) return;
+    const parts = _supplyPdfEntries.map(e =>
+      '--supply-pdf "' + e.id + '=' + e.path + '"'
+    );
+    cmd.textContent = parts.join(' \\\n  ');
+    banner.style.display = 'block';
+  }
+
+  // Click to copy
+  const supplyCmd = document.getElementById('citracer-supply-cmd');
+  if (supplyCmd) {
+    supplyCmd.addEventListener('click', () => {
+      const text = supplyCmd.textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = supplyCmd.style.outline;
+        supplyCmd.style.outline = '2px solid #6cf';
+        setTimeout(() => { supplyCmd.style.outline = orig; }, 600);
+      });
+    });
+  }
+
+  // Dismiss banner
+  const supplyClose = document.getElementById('citracer-supply-close');
+  if (supplyClose) {
+    supplyClose.addEventListener('click', () => {
+      document.getElementById('citracer-supply-banner').style.display = 'none';
+    });
+  }
 
   // Dismiss context menu on any outside click or Escape
   document.addEventListener('click', (ev) => {

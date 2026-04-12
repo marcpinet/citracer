@@ -133,9 +133,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--supply-pdf",
         action="append",
         default=[],
-        metavar="ID=PATH",
-        help="Supply a local PDF for a paper node. ID is the paper_id from a "
-             "previous graph export (e.g. 'doi:10.1234/foo=paper.pdf'). "
+        metavar="ID=PATH_OR_URL",
+        help="Supply a PDF for a paper node, either as a local path or a URL. "
+             "ID is the paper_id from a previous graph export. Examples: "
+             "'doi:10.1234/foo=paper.pdf', "
+             "'title:abc123=https://example.com/paper.pdf'. "
              "Repeat for multiple papers.",
     )
     p.add_argument(
@@ -260,18 +262,49 @@ def main(argv: list[str] | None = None) -> int:
             "Once you have a key, run: citracer config set-s2-key <key>"
         )
 
-    # Parse --supply-pdf specs
+    # Parse --supply-pdf specs (local path or URL)
     supplied_pdfs: dict[str, Path] = {}
+    cache_dir = Path(args.cache_dir)
+    pdf_cache = cache_dir / "pdfs"
+    pdf_cache.mkdir(parents=True, exist_ok=True)
     for spec in args.supply_pdf:
         if "=" not in spec:
-            logger.error("--supply-pdf must be ID=PATH, got: %s", spec)
+            logger.error("--supply-pdf must be ID=PATH or ID=URL, got: %s", spec)
             return 2
         pid, ppath = spec.split("=", 1)
-        p = Path(ppath).expanduser()
-        if not p.exists():
-            logger.error("Supplied PDF not found: %s", p)
-            return 2
-        supplied_pdfs[pid.strip()] = p
+        pid = pid.strip()
+        ppath = ppath.strip()
+        if ppath.startswith("http://") or ppath.startswith("https://"):
+            # Download URL to cache
+            import re as _re
+            safe = _re.sub(r"[^\w\-.]", "_", pid)[:80]
+            dest = pdf_cache / f"supplied_{safe}.pdf"
+            if not (dest.exists() and dest.stat().st_size > 0):
+                logger.info("Downloading supplied PDF for %s ...", pid)
+                try:
+                    r = requests.get(
+                        ppath, timeout=60,
+                        headers={"User-Agent": "citracer"},
+                        allow_redirects=True,
+                    )
+                except Exception as e:
+                    logger.error("Failed to download %s: %s", ppath, e)
+                    return 2
+                if r.status_code != 200 or not r.content.startswith(b"%PDF"):
+                    logger.error(
+                        "Download failed for %s (HTTP %s, starts with %r)",
+                        ppath, r.status_code, r.content[:10],
+                    )
+                    return 2
+                dest.write_bytes(r.content)
+                logger.info("Downloaded supplied PDF: %s -> %s", ppath, dest.name)
+            supplied_pdfs[pid] = dest
+        else:
+            p = Path(ppath).expanduser()
+            if not p.exists():
+                logger.error("Supplied PDF not found: %s", p)
+                return 2
+            supplied_pdfs[pid] = p
     if supplied_pdfs:
         logger.info("User-supplied PDFs for %d node(s)", len(supplied_pdfs))
 

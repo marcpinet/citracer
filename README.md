@@ -117,7 +117,9 @@ citracer --arxiv 2211.14730 --keyword "channel-independent" --reverse --reverse-
 citracer --pdf paper.pdf --keyword "attention" --enrich --email your@email.com
 
 # Supply a local PDF for a node that citracer couldn't download
+# Supply a local PDF or a URL for a node that citracer couldn't download
 citracer --pdf paper.pdf --keyword "attention" --supply-pdf "doi:10.1234/foo=~/papers/foo.pdf"
+citracer --pdf paper.pdf --keyword "attention" --supply-pdf "title:abc123=https://example.com/paper.pdf"
 
 # Export the graph for downstream analysis
 citracer --pdf paper.pdf --keyword "..." --export out/graph.json --export out/graph.graphml
@@ -158,7 +160,7 @@ citracer --pdf paper.pdf --keyword "attention" --semantic --semantic-threshold 0
 | `--reverse-limit` | `500` | Max number of citing papers to fetch per level in reverse mode. Protects against runaway expansion on papers with thousands of citations |
 | `--enrich` | off | Enable metadata enrichment via [OpenAlex](https://openalex.org/) for nodes missing abstract, citation count, or year. Anonymous mode (1 req/s); combine with `--email` for 10x faster lookups |
 | `--email` | none | Email for OpenAlex polite pool (10 req/s). Implies `--enrich`. Can also be set via `OPENALEX_EMAIL` env var or `citracer config set-email` |
-| `--supply-pdf` | none | Supply a local PDF for a specific node. Format: `ID=PATH` where ID is the `paper_id` from a previous graph export (e.g. `doi:10.1234/foo=paper.pdf`). Repeat for multiple papers |
+| `--supply-pdf` | none | Supply a PDF for a specific node, as a local path or URL. Format: `ID=PATH` or `ID=URL` where ID is the `paper_id` from a previous graph export (e.g. `doi:10.1234/foo=paper.pdf` or `title:abc123=https://example.com/paper.pdf`). Repeat for multiple papers |
 | `--diff` | none | Compare against a previous citracer JSON export and highlight new nodes (papers not in the baseline) in orange. Useful for monitoring how a citation graph evolves over time |
 | `--since` | none | Highlight nodes published on or after this date (`YYYY` or `YYYY-MM`). Works alone (date filter) or with `--diff` (intersection: new AND recent). Uses S2 `publicationDate` for month precision when available, falls back to year |
 | `--semantic` | off | Enable semantic matching: after the regex pass, scan remaining sentences with a [sentence-transformer](https://www.sbert.net/) embedding model to catch conceptual matches the regex missed (e.g. "univariate processing" for the keyword "channel-independent"). Requires `pip install citracer[semantic]` |
@@ -395,7 +397,7 @@ External APIs:
 - The narrative-citation supplementation pass skips ambiguous `(surname, year)` signatures (e.g. two different Zhou 2022 papers in the bibliography). These missed cases are rare but do happen in survey-heavy papers.
 - pysbd handles most academic abbreviations but can occasionally split mid-sentence; falling back to `--context-window 300` is sometimes useful.
 - arXiv enforces ~3 seconds between requests, so the first run on a deep trace can take several minutes. The local cache makes subsequent runs fast.
-- Papers that cannot be resolved through any source in the download cascade (arXiv, OpenReview, Sci-Hub, S2 open-access, preprint servers) appear as `unavailable` red nodes. Books and some workshop proceedings are typically not retrievable. Use `--supply-pdf` to provide PDFs manually for these nodes.
+- Papers that cannot be resolved through any source in the download cascade (arXiv, OpenReview, Sci-Hub, S2 open-access, preprint servers) appear as `unavailable` red nodes. Books and some workshop proceedings are typically not retrievable. Use `--supply-pdf` to provide PDFs manually (local path or URL) for these nodes.
 - The "Fruchterman-Reingold" layout option is implemented via vis.js's `forceAtlas2Based` solver, which is the closest approximation available natively. A proper Kamada-Kawai implementation isn't offered because vis.js doesn't ship one.
 - `--semantic` matching depends on the quality of the sentence-transformer model. The default `all-mpnet-base-v2` was benchmarked at F1=0.93 on academic citation text (vs 0.86 for `all-MiniLM-L6-v2`). Domain-specific keywords may benefit from threshold tuning. Semantic matching is not available in reverse trace mode.
 

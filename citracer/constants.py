@@ -123,6 +123,13 @@ ARXIV_KEYWORD_SEARCH_MAX_WORDS: int = 8
 #: Minimum length for a title word to count in the keyword fallback query.
 ARXIV_KEYWORD_SEARCH_MIN_WORD_LEN: int = 4
 
+#: Max year gap allowed between a bibliography entry's year and a search
+#: result's year. Rejects matches like "Finding Motifs in Time Series"
+#: (Lin 2002) -> "Finding Motif Sets in Time Series" (Bagnall 2014).
+#: Set to 3 to allow preprint-to-publication gaps (typically 0-2 years)
+#: with a small margin. Only applied when both years are known.
+SEARCH_YEAR_TOLERANCE: int = 3
+
 #: Sci-Hub mirror URLs, tried in order. The first one that responds wins.
 SCIHUB_MIRRORS: tuple[str, ...] = (
     "https://www.sci-hub.in",
