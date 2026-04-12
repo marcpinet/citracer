@@ -8,7 +8,15 @@
     font-size: 13px; border: 1px solid #ccc;
     box-shadow: 0 2px 8px rgba(0,0,0,0.08); z-index: 9999;
   }
-  #citracer-legend { top: 10px; left: 10px; max-width: 320px; }
+  #citracer-legend { top: 10px; left: 10px; width: 280px; min-width: 200px; max-width: 50vw; max-height: calc(100vh - 30px); overflow-y: auto; overflow-x: hidden; }
+  #citracer-legend-resize {
+    position: fixed; top: 10px; width: 8px; height: calc(100vh - 30px);
+    cursor: col-resize; z-index: 10001;
+    pointer-events: auto;
+  }
+  #citracer-legend-resize:hover, #citracer-legend-resize.active {
+    background: rgba(0,102,204,0.3); border-radius: 4px;
+  }
   #citracer-info   { top: 10px; right: 10px; width: 380px;
                      max-height: calc(100vh - 30px); overflow-y: auto;
                      display: none; }
@@ -102,10 +110,21 @@
   }
   #citracer-hidden-banner:hover { text-decoration: underline; }
   #citracer-hidden-banner.empty { display: none; }
+  #citracer-footer {
+    border-top: 1px solid #eee; margin-top: 8px; padding-top: 8px;
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    flex-wrap: wrap;
+  }
+  #citracer-footer .export-group {
+    display: flex; align-items: center; gap: 4px;
+  }
+  #citracer-footer button, #citracer-footer select {
+    font-size: 11px; padding: 3px 8px; border: 1px solid #ccc;
+    border-radius: 4px; background: #fff; cursor: pointer; color: #222;
+  }
+  #citracer-footer button:hover { background: #f0f0f0; border-color: #999; }
   #citracer-reset {
     color: #888; font-size: 10px; cursor: pointer; user-select: none;
-    padding: 4px 0; text-align: right;
-    border-top: 1px solid #eee; margin-top: 6px;
   }
   #citracer-reset:hover { color: #c33; text-decoration: underline; }
   #citracer-reset.saved::before {
@@ -152,7 +171,8 @@
 </style>
 
 <div id="citracer-legend" class="citracer-panel">
-  <div style="font-weight:bold;margin-bottom:6px;">💬 Citracer</div>
+  <div id="citracer-legend-resize"></div>
+  <div style="font-weight:bold;margin-bottom:6px;display:flex;align-items:center;gap:6px;"><img src="https://raw.githubusercontent.com/marcpinet/citracer/main/readme_data/logo.png" alt="" style="height:20px;width:20px;object-fit:contain;">citracer</div>
   <div>keyword: {{KEYWORD_CHIPS}}</div>
   <div id="citracer-counts">{{N_NODES}} papers · {{N_EDGES}} citations</div>
 
@@ -194,20 +214,22 @@
 {{LEGEND_ROWS}}
   <div id="citracer-hidden-banner" class="empty">show N manually hidden</div>
 {{EDGES_LEGEND}}
-  <details id="citracer-analytics-section" style="margin-top:8px;">
-    <summary style="cursor:pointer;font-size:11px;color:#888;user-select:none;">analytics</summary>
+  <details id="citracer-analytics-section" style="margin-top:10px;">
+    <summary style="cursor:pointer;font-size:12px;color:#222;user-select:none;font-weight:bold;padding:4px 8px;background:#f0f0f0;border-radius:4px;border:1px solid #ddd;">Analytics</summary>
     <div id="citracer-analytics-body" style="font-size:11px;margin-top:4px;"></div>
   </details>
-  <div style="margin-top:8px;display:flex;align-items:center;gap:6px;">
-    <button id="citracer-export-png" title="Export as high-resolution PNG (raster)" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;color:#222;">PNG</button>
-    <select id="citracer-export-scale" title="Resolution multiplier for PNG" style="font-size:11px;padding:2px 4px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;">
-      <option value="2">2x</option>
-      <option value="3" selected>3x</option>
-      <option value="4">4x</option>
-    </select>
-    <button id="citracer-export-svg" title="Export as SVG (vector, lossless zoom)" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;color:#222;">SVG</button>
+  <div id="citracer-footer">
+    <div class="export-group">
+      <button id="citracer-export-svg" title="Export as SVG (vector, lossless zoom)">SVG</button>
+      <button id="citracer-export-png" title="Export as high-resolution PNG">PNG</button>
+      <select id="citracer-export-scale" title="Resolution multiplier for PNG">
+        <option value="2">2x</option>
+        <option value="3" selected>3x</option>
+        <option value="4">4x</option>
+      </select>
+    </div>
+    <span id="citracer-reset" title="clear saved layout, filters and positions">reset</span>
   </div>
-  <div id="citracer-reset" title="clear saved layout, filters and positions">reset saved state</div>
 </div>
 
 <div id="citracer-info" class="citracer-panel">
@@ -254,11 +276,95 @@
   let saveTimer = null;
   let stateLoaded = false;
 
+  // --- Undo / Redo history ---
+  const _undoStack = [];
+  const _redoStack = [];
+  const _MAX_UNDO = 50;
+
+  function _captureSnapshot() {
+    const positions = (typeof network !== 'undefined' && network)
+      ? network.getPositions() : {};
+    return {
+      positions: JSON.parse(JSON.stringify(positions)),
+      disabledStatus: Array.from(disabledStatus),
+      disabledEdgeTypes: Array.from(disabledEdgeTypes),
+      manuallyHidden: Array.from(manuallyHidden),
+      layout: currentLayout,
+      sizeMode: currentSizeMode,
+      spread: currentSpread,
+      curvedEdges: curvedEdges,
+    };
+  }
+
+  function _applySnapshot(snap) {
+    // Positions
+    if (snap.positions && typeof network !== 'undefined' && network) {
+      const updates = [];
+      for (const id in snap.positions) {
+        const p = snap.positions[id];
+        if (p && typeof p.x === 'number' && typeof p.y === 'number') {
+          updates.push({ id: id, x: p.x, y: p.y });
+        }
+      }
+      if (updates.length) nodes.update(updates);
+    }
+    // Filters
+    disabledStatus.clear();
+    snap.disabledStatus.forEach(s => disabledStatus.add(s));
+    disabledEdgeTypes.clear();
+    snap.disabledEdgeTypes.forEach(t => disabledEdgeTypes.add(t));
+    manuallyHidden.clear();
+    snap.manuallyHidden.forEach(i => manuallyHidden.add(i));
+    // Controls
+    currentLayout = snap.layout;
+    currentSizeMode = snap.sizeMode;
+    currentSpread = snap.spread;
+    curvedEdges = snap.curvedEdges;
+    // Sync UI
+    const layoutSel = document.getElementById('citracer-layout');
+    if (layoutSel) layoutSel.value = currentLayout;
+    const sizeSel = document.getElementById('citracer-size');
+    if (sizeSel) sizeSel.value = currentSizeMode;
+    const spreadSl = document.getElementById('citracer-spread');
+    if (spreadSl) spreadSl.value = String(currentSpread);
+    const curvedCb = document.getElementById('citracer-curved');
+    if (curvedCb) curvedCb.checked = curvedEdges;
+    document.querySelectorAll('.legend-item').forEach(el => {
+      const s = el.getAttribute('data-status');
+      el.classList.toggle('disabled', disabledStatus.has(s));
+    });
+    document.querySelectorAll('.legend-edge-toggle').forEach(el => {
+      const t = el.getAttribute('data-edge-type');
+      el.classList.toggle('disabled', disabledEdgeTypes.has(t));
+    });
+    applyFilter();
+    applyCurvedEdges();
+  }
+
+  function _pushUndo() {
+    _undoStack.push(_captureSnapshot());
+    if (_undoStack.length > _MAX_UNDO) _undoStack.shift();
+    _redoStack.length = 0;  // clear redo on new action
+  }
+
+  function undo() {
+    if (_undoStack.length === 0) return;
+    _redoStack.push(_captureSnapshot());
+    _applySnapshot(_undoStack.pop());
+  }
+
+  function redo() {
+    if (_redoStack.length === 0) return;
+    _undoStack.push(_captureSnapshot());
+    _applySnapshot(_redoStack.pop());
+  }
+
   function saveState() {
     // Debounce so rapid events (slider drag, physics settling) don't spam
     // localStorage writes.
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
+      _pushUndo();
       try {
         const positions = (typeof network !== 'undefined' && network)
           ? network.getPositions() : {};
@@ -928,7 +1034,9 @@
     });
   }
 
-  // Export PNG — captures the canvas at high resolution
+  // Export PNG — renders the graph to a large offscreen canvas manually
+  // (vis.js canvas scaling is unreliable for export, so we draw nodes/edges
+  // ourselves using the same position/color/size data as the SVG exporter)
   const exportBtn = document.getElementById('citracer-export-png');
   if (exportBtn) {
     exportBtn.addEventListener('click', () => {
@@ -937,38 +1045,148 @@
       exportBtn.textContent = 'Rendering...';
       exportBtn.disabled = true;
 
-      // Fit all visible nodes, then capture after the animation settles
       network.fit();
       setTimeout(() => {
         try {
-          const srcCanvas = network.canvas.frame.canvas;
-          const w = srcCanvas.width;
-          const h = srcCanvas.height;
+          const positions = network.getPositions();
+          const allNodeIds = Object.keys(positions);
+          if (!allNodeIds.length) { exportBtn.textContent = 'PNG'; exportBtn.disabled = false; return; }
 
-          // Create a high-res offscreen canvas
-          const dst = document.createElement('canvas');
-          dst.width = w * scale;
-          dst.height = h * scale;
-          const ctx = dst.getContext('2d');
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
+          // Bounding box
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          allNodeIds.forEach(id => {
+            const p = positions[id];
+            if (p.x < minX) minX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y > maxY) maxY = p.y;
+          });
+          const pad = 120;
+          minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+          const w = maxX - minX;
+          const h = maxY - minY;
 
-          // Draw the vis.js canvas scaled up
-          ctx.drawImage(srcCanvas, 0, 0, w, h, 0, 0, dst.width, dst.height);
+          const canvas = document.createElement('canvas');
+          canvas.width = w * scale;
+          canvas.height = h * scale;
+          const ctx = canvas.getContext('2d');
+          ctx.scale(scale, scale);
+          ctx.translate(-minX, -minY);
 
-          // Trigger download
-          dst.toBlob((blob) => {
+          // White background
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(minX, minY, w, h);
+
+          const colors = {
+            root: '#1f77b4', analyzed: '#2ca02c', no_match: '#9e9e9e',
+            unavailable: '#d62728', pending: '#cccccc', new: '#ff8c00',
+          };
+
+          // Draw edges
+          edges.forEach(e => {
+            if (e.hidden) return;
+            const from = positions[e.from];
+            const to = positions[e.to];
+            if (!from || !to) return;
+            const isSec = edgeType(e) === 'secondary';
+
+            const dx = to.x - from.x, dy = to.y - from.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 1) return;
+            const toNode = nodes.get(e.to);
+            const r = (toNode && toNode.size) || 20;
+            const ratio = Math.max(0, (dist - r - 6) / dist);
+            const tx = from.x + dx * ratio, ty = from.y + dy * ratio;
+
+            ctx.save();
+            ctx.strokeStyle = isSec ? '#5c87b5' : '#444444';
+            ctx.lineWidth = isSec ? 1.5 : 2.5;
+            ctx.globalAlpha = isSec ? 0.75 : 0.9;
+            if (isSec) ctx.setLineDash([6, 6]);
+
+            if (curvedEdges) {
+              const mx = (from.x + tx) / 2, my = (from.y + ty) / 2;
+              const nx = -(ty - from.y), ny = tx - from.x;
+              const nl = Math.sqrt(nx * nx + ny * ny) || 1;
+              const curve = isSec ? 0.15 : 0.10;
+              const cpx = mx + nx / nl * dist * curve;
+              const cpy = my + ny / nl * dist * curve;
+              ctx.beginPath();
+              ctx.moveTo(from.x, from.y);
+              ctx.quadraticCurveTo(cpx, cpy, tx, ty);
+              ctx.stroke();
+            } else {
+              ctx.beginPath();
+              ctx.moveTo(from.x, from.y);
+              ctx.lineTo(tx, ty);
+              ctx.stroke();
+            }
+
+            // Arrowhead
+            const angle = Math.atan2(ty - from.y, tx - from.x);
+            const aLen = 10;
+            ctx.setLineDash([]);
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.beginPath();
+            ctx.moveTo(tx, ty);
+            ctx.lineTo(tx - aLen * Math.cos(angle - 0.35), ty - aLen * Math.sin(angle - 0.35));
+            ctx.lineTo(tx - aLen * Math.cos(angle + 0.35), ty - aLen * Math.sin(angle + 0.35));
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          });
+
+          // Draw nodes
+          allNodeIds.forEach(id => {
+            const n = nodes.get(id);
+            if (!n || n.hidden) return;
+            const p = positions[id];
+            const d = NODE_DETAILS[id] || {};
+            const effectiveStatus = d.is_new ? 'new' : (d.status || 'pending');
+            const fill = colors[effectiveStatus] || colors.pending;
+            const r = n.size || 20;
+
+            ctx.save();
+            ctx.globalAlpha = 0.9;
+            ctx.fillStyle = fill;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fill();
+            if (effectiveStatus === 'root') {
+              ctx.lineWidth = 3;
+              ctx.strokeStyle = '#0b3d61';
+              ctx.stroke();
+            }
+            ctx.restore();
+
+            // Full label
+            const title = d.title || n.label || '';
+            const year = d.year ? String(d.year) : '';
+            const label = title + (year ? ' (' + year + ')' : '');
+            if (label) {
+              ctx.save();
+              ctx.font = '11px system-ui, sans-serif';
+              ctx.fillStyle = '#222222';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'top';
+              ctx.fillText(label, p.x, p.y + r + 4);
+              ctx.restore();
+            }
+          });
+
+          // Download
+          canvas.toBlob((blob) => {
             const a = document.createElement('a');
             a.download = 'citracer-graph.png';
             a.href = URL.createObjectURL(blob);
             a.click();
             URL.revokeObjectURL(a.href);
-            exportBtn.textContent = 'Export PNG';
+            exportBtn.textContent = 'PNG';
             exportBtn.disabled = false;
           }, 'image/png');
         } catch (e) {
           console.error('PNG export failed:', e);
-          exportBtn.textContent = 'Export PNG';
+          exportBtn.textContent = 'PNG';
           exportBtn.disabled = false;
           alert('PNG export failed. See console for details.');
         }
@@ -998,7 +1216,7 @@
           if (p.x > maxX) maxX = p.x;
           if (p.y > maxY) maxY = p.y;
         });
-        const pad = 80;
+        const pad = 150;  // enough for full-length labels
         minX -= pad; minY -= pad; maxX += pad; maxY += pad;
         const w = maxX - minX;
         const h = maxY - minY;
@@ -1017,7 +1235,7 @@
         svg += '<defs><marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto"><path d="M0,0 L10,3 L0,6 Z" fill="#444"/></marker>';
         svg += '<marker id="arrow-sec" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto"><path d="M0,0 L10,3 L0,6 Z" fill="#5c87b5"/></marker></defs>\n';
 
-        // Draw edges
+        // Draw edges (curved or straight, matching the current UI toggle)
         edges.forEach(e => {
           if (e.hidden) return;
           const from = positions[e.from];
@@ -1030,7 +1248,7 @@
           const dash = isSec ? ' stroke-dasharray="6,6"' : '';
           const marker = isSec ? 'url(#arrow-sec)' : 'url(#arrow)';
 
-          // Shorten line so arrowhead doesn't overlap the node circle
+          // Shorten endpoint so arrowhead doesn't overlap the node circle
           const dx = to.x - from.x, dy = to.y - from.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < 1) return;
@@ -1039,10 +1257,24 @@
           const ratio = Math.max(0, (dist - r - 2) / dist);
           const tx = from.x + dx * ratio, ty = from.y + dy * ratio;
 
-          svg += '<line x1="' + from.x.toFixed(1) + '" y1="' + from.y.toFixed(1) + '" x2="' + tx.toFixed(1) + '" y2="' + ty.toFixed(1) + '" stroke="' + stroke + '" stroke-width="' + strokeW + '" opacity="' + opacity + '"' + dash + ' marker-end="' + marker + '"/>\n';
+          if (curvedEdges) {
+            // Quadratic Bézier: control point perpendicular to the midpoint
+            const mx = (from.x + tx) / 2, my = (from.y + ty) / 2;
+            const nx = -(ty - from.y), ny = tx - from.x;
+            const nl = Math.sqrt(nx * nx + ny * ny) || 1;
+            const curve = isSec ? 0.15 : 0.10;
+            const cx = mx + nx / nl * dist * curve;
+            const cy = my + ny / nl * dist * curve;
+            svg += '<path d="M' + from.x.toFixed(1) + ',' + from.y.toFixed(1)
+                  + ' Q' + cx.toFixed(1) + ',' + cy.toFixed(1)
+                  + ' ' + tx.toFixed(1) + ',' + ty.toFixed(1)
+                  + '" fill="none" stroke="' + stroke + '" stroke-width="' + strokeW + '" opacity="' + opacity + '"' + dash + ' marker-end="' + marker + '"/>\n';
+          } else {
+            svg += '<line x1="' + from.x.toFixed(1) + '" y1="' + from.y.toFixed(1) + '" x2="' + tx.toFixed(1) + '" y2="' + ty.toFixed(1) + '" stroke="' + stroke + '" stroke-width="' + strokeW + '" opacity="' + opacity + '"' + dash + ' marker-end="' + marker + '"/>\n';
+          }
         });
 
-        // Draw nodes
+        // Draw nodes with full titles (not the truncated vis.js label)
         allNodeIds.forEach(id => {
           const n = nodes.get(id);
           if (!n || n.hidden) return;
@@ -1055,11 +1287,13 @@
 
           svg += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="' + r + '" fill="' + fill + '" stroke="' + fill + '" stroke-width="' + borderW + '" opacity="0.9"/>\n';
 
-          // Label
-          const label = n.label || '';
-          if (label) {
-            const escaped = label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            svg += '<text x="' + p.x.toFixed(1) + '" y="' + (p.y + r + 14).toFixed(1) + '" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#222">' + escaped + '</text>\n';
+          // Full title + year from node details (not the truncated vis.js label)
+          const title = d.title || n.label || '';
+          const year = d.publication_date || (d.year ? String(d.year) : '');
+          const fullLabel = title + (year ? ' (' + year + ')' : '');
+          if (fullLabel) {
+            const escaped = fullLabel.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            svg += '<text x="' + p.x.toFixed(1) + '" y="' + (p.y + r + 14).toFixed(1) + '" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#222">' + escaped + '</text>\n';
           }
         });
 
@@ -1079,6 +1313,42 @@
       svgBtn.textContent = 'SVG';
       svgBtn.disabled = false;
     });
+  }
+
+  // Legend panel resize via right-edge drag
+  const resizeHandle = document.getElementById('citracer-legend-resize');
+  const legendPanel = document.getElementById('citracer-legend');
+  if (resizeHandle && legendPanel) {
+    // Position the fixed handle at the right edge of the panel
+    function syncHandle() {
+      const rect = legendPanel.getBoundingClientRect();
+      resizeHandle.style.left = (rect.right - 4) + 'px';
+    }
+    syncHandle();
+
+    let dragging = false;
+    resizeHandle.addEventListener('mousedown', (ev) => {
+      ev.preventDefault();
+      dragging = true;
+      resizeHandle.classList.add('active');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', (ev) => {
+      if (!dragging) return;
+      const rect = legendPanel.getBoundingClientRect();
+      const newWidth = Math.max(200, Math.min(ev.clientX - rect.left, window.innerWidth * 0.5));
+      legendPanel.style.width = newWidth + 'px';
+      syncHandle();
+    });
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      resizeHandle.classList.remove('active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    });
+    window.addEventListener('resize', syncHandle);
   }
 
   // Reset button — clears saved state and reloads the page to start fresh
@@ -1107,9 +1377,14 @@
       h += '<div style="margin-top:6px;font-weight:bold;">Pivot papers (' + pivots.length + ')</div>';
       pivots.forEach(function(pid) {
         const d = NODE_DETAILS[pid];
-        const label = d ? (d.title || '').substring(0, 40) + (d.year ? ' (' + d.year + ')' : '') : pid;
+        if (!d) { h += '<div>' + escapeHtml(pid) + '</div>'; return; }
+        const authors = (d.authors && d.authors.length) ? d.authors[0].split(' ').pop() + (d.authors.length > 1 ? ' et al.' : '') : '';
+        const title = d.title || '';
+        const label = (authors ? authors + ' - ' : '') + title + (d.year ? ' (' + d.year + ')' : '');
         h += '<div class="citracer-pivot-link" data-node-id="' + escapeHtml(pid) + '" '
-           + 'style="cursor:pointer;color:#1f77b4;text-decoration:underline;margin:2px 0;">'
+           + 'style="cursor:pointer;color:#1f77b4;text-decoration:underline;margin:2px 0;'
+           + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;" '
+           + 'title="' + escapeHtml(label) + '">'
            + escapeHtml(label) + '</div>';
       });
     }
@@ -1425,5 +1700,20 @@
   if (!tryAttach()) {
     const t = setInterval(() => { if (tryAttach()) clearInterval(t); }, 200);
   }
+
+  // Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) for undo/redo
+  document.addEventListener('keydown', (ev) => {
+    // Don't intercept when typing in an input/textarea
+    if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA') return;
+    if (ev.ctrlKey || ev.metaKey) {
+      if (ev.key === 'z' && !ev.shiftKey) {
+        ev.preventDefault();
+        undo();
+      } else if (ev.key === 'y' || (ev.key === 'z' && ev.shiftKey)) {
+        ev.preventDefault();
+        redo();
+      }
+    }
+  });
 })();
 </script>

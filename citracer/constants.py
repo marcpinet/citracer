@@ -100,7 +100,7 @@ ARXIV_MIN_INTERVAL: float = 3.0
 
 #: rapidfuzz token_set_ratio threshold for accepting an arXiv search hit
 #: as the correct paper (0-100 scale).
-ARXIV_FUZZY_MATCH_THRESHOLD: int = 85
+TITLE_FUZZY_MATCH_THRESHOLD: int = 85
 
 #: Same threshold for OpenReview hits.
 OPENREVIEW_FUZZY_MATCH_THRESHOLD: int = 85

@@ -101,6 +101,8 @@ class TracerGraph:
             self.nodes[node.paper_id] = node
 
     def add_edge(self, edge: CitationEdge) -> None:
+        if edge.source_id == edge.target_id:
+            return  # reject self-citations
         key = (edge.source_id, edge.target_id, edge.edge_type)
         if key in self._edge_index:
             return

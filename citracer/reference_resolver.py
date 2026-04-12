@@ -25,7 +25,7 @@ from .api_types import NormalizedMeta, OpenReviewCandidate, S2Paper, S2SearchRes
 from .metadata_cache import MetadataCache
 from .constants import (
     ARXIV_COOLDOWN_AFTER_FAILURE_SECONDS,
-    ARXIV_FUZZY_MATCH_THRESHOLD,
+    TITLE_FUZZY_MATCH_THRESHOLD,
     ARXIV_KEYWORD_SEARCH_MAX_WORDS,
     ARXIV_KEYWORD_SEARCH_MIN_WORD_LEN,
     ARXIV_MIN_INTERVAL,
@@ -459,7 +459,7 @@ class ReferenceResolver:
 
     def _s2_search(self, title: str) -> NormalizedMeta | None:
         q = re.sub(r"\s+", " ", title).strip()[:300]
-        url = f"{S2_BASE}/paper/search?query={requests.utils.quote(q)}&limit=1&fields={S2_FIELDS}"
+        url = f"{S2_BASE}/paper/search?query={requests.utils.quote(q)}&limit=3&fields={S2_FIELDS}"
         data = self._s2_get(url, f"search {q[:60]!r}")
         if not data:
             return None
@@ -467,7 +467,24 @@ class ReferenceResolver:
         items = resp.get("data") or []
         if not items:
             return None
-        return self._normalize_s2(items[0])
+        # Validate with fuzzy matching (same as arXiv/OpenReview searches)
+        target = normalize_title(title)
+        best = None
+        best_score = 0.0
+        for item in items:
+            candidate = normalize_title(item.get("title") or "")
+            score = min(
+                fuzz.token_set_ratio(target, candidate),
+                fuzz.token_sort_ratio(target, candidate),
+            )
+            if score > best_score:
+                best_score = score
+                best = item
+        if best is None or best_score < TITLE_FUZZY_MATCH_THRESHOLD:
+            logger.debug("S2 search: no good match for %r (best=%s)", title[:60], best_score)
+            return None
+        logger.info("S2 search hit for %r (score=%d)", title[:50], best_score)
+        return self._normalize_s2(best)
 
     # ---------- arXiv title search fallback ----------
 
@@ -510,7 +527,7 @@ class ReferenceResolver:
                 best_score = score
                 best = r
 
-        if best is None or best_score < ARXIV_FUZZY_MATCH_THRESHOLD:
+        if best is None or best_score < TITLE_FUZZY_MATCH_THRESHOLD:
             logger.debug("arxiv search: no good match for %r (best=%s)", title[:60], best_score)
             # Do NOT cache negatives — arxiv/openreview search results are
             # fragile (service blips, indexing latency, our own bug fixes).
