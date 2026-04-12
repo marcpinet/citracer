@@ -26,9 +26,9 @@ With `--semantic`, a second pass embeds remaining sentences with a sentence-tran
 Each cited paper is resolved through a cascade:
 
 1. **GROBID-extracted DOI/arXiv ID** (direct, most reliable)
-2. **arXiv title search** (phrase first, then keyword fallback, with fuzzy validation)
-3. **Semantic Scholar** (with 429-aware backoff and circuit breaker)
-4. **OpenReview** (covers ICLR/TMLR papers)
+2. **arXiv title search** (phrase first, then keyword fallback, with fuzzy title validation and year cross-check ±3 years)
+3. **Semantic Scholar** (same title + year validation, with 429-aware backoff and circuit breaker)
+4. **OpenReview** (covers ICLR/TMLR papers, with circuit breaker on timeouts)
 5. **OpenAlex** (optional, via `--enrich`)
 
 PDF download cascade: user-supplied PDF > arXiv > OpenReview > Sci-Hub > S2 open-access URL > preprint servers (bioRxiv, medRxiv, ChemRxiv, SSRN, PsyArXiv, AgriXiv, engrXiv).

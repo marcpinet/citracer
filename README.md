@@ -217,11 +217,13 @@ Other interactive features:
 - **Hover** any node → side panel updates live with title, authors, year, citation count, status, centrality metrics (PageRank, betweenness, in/out degree), a **PIVOT** badge for pivot papers, keyword hits (regex matches are highlighted; semantic matches show a purple **SEM** badge with the note "conceptual match") and a collapsible **abstract** section when available
 - **Search** box in the control panel → fuzzy match by title or author, click a result to focus-and-pin the matching node
 - **Click** a node → pins the panel; a blue border is drawn around the node to show the pinned state. The pin survives clicks on the empty canvas, hover on other nodes, and pan/zoom. It's only released by clicking the same node again, pressing the × close button on the info panel, or picking **Unpin** from the right-click menu
-- **Right-click** any node → context menu with **Hide** (permanently hides the node until you click the "show N manually hidden" banner in the legend), **Pin/Unpin**, and **Open link** (opens the arxiv/OpenReview/DOI page in a new tab)
+- **Right-click** any node → context menu with **Hide**, **Pin/Unpin**, **Open link**, and **Supply PDF** (on unavailable nodes only, prompts for a local path or URL and generates the `--supply-pdf` command to copy for the next run)
 - **Drag** any node anywhere. After initial placement the layout is released, so nothing snaps back
+- **Undo / Redo** with `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`). Reverts node positions, filters, layout, and all control settings. History of up to 50 snapshots
+- **Resizable panel**: drag the right edge of the control panel to widen or narrow it
 - **`show N more`** in a panel with many hits → expands the full list
 - **LaTeX math** in passages is rendered with [KaTeX](https://katex.org) (`$...$`, `$$...$$`, `\(...\)`, `\[...\]`)
-- **Automatic state persistence**. Node positions, filters, pin state, dropdowns, spread slider and manually hidden nodes are all saved to `localStorage` keyed on a hash of the node-id set. A browser refresh restores the exact view you had. A new trace with a different paper set gets a fresh slate. The **reset saved state** link at the bottom of the legend clears everything and reloads. A 💾 icon appears next to the reset link while state is present
+- **Automatic state persistence**. Node positions, filters, pin state, dropdowns, spread slider and manually hidden nodes are all saved to `localStorage` keyed on a hash of the node-id set. A browser refresh restores the exact view you had. A new trace with a different paper set gets a fresh slate. The **reset** link at the bottom of the panel clears everything and reloads
 
 ### Bibliometric analytics
 
@@ -264,8 +266,8 @@ This allows anyone receiving a citracer graph to re-run the trace with identical
 
 4. **Reference resolution.** Each cited paper is resolved through the following cascade:
    1. If GROBID extracted a DOI or arXiv ID, use it directly.
-   2. Otherwise, search arXiv by title (phrase first, then keyword fallback, with rapidfuzz validation).
-   3. If arXiv has nothing, query Semantic Scholar with 429-aware backoff (also retrieves citation count and open-access PDF URL).
+   2. Otherwise, search arXiv by title (phrase first, then keyword fallback, with rapidfuzz validation). Search results are validated by fuzzy title match (threshold 85) and year cross-check (±3 years from the bibliography entry's year when known) to prevent false matches on similarly-titled papers from different eras.
+   3. If arXiv has nothing, query Semantic Scholar with the same title + year validation, plus 429-aware backoff (also retrieves citation count and open-access PDF URL).
    4. As a last resort, search OpenReview (covers ICLR/TMLR papers not on arXiv).
    5. If `--enrich` is set, query OpenAlex for missing metadata (abstract, citation count, OA URL).
 

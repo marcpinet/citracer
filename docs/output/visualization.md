@@ -39,8 +39,10 @@ The top-left panel provides:
 
 - **Hover** a node to see its info panel (title, authors, year, status, metrics, keyword hits, abstract)
 - **Click** a node to pin the panel. Click again or press x to unpin
-- **Right-click** a node for Hide, Pin/Unpin, or Open link
+- **Right-click** a node for Hide, Pin/Unpin, Open link, and Supply PDF (on unavailable nodes, generates the `--supply-pdf` command to copy)
 - **Drag** any node to reposition it
+- **Undo/Redo** with Ctrl+Z / Ctrl+Y (Cmd on Mac). Reverts positions, filters, layout, and all settings
+- **Resizable panel**: drag the right edge of the control panel to widen or narrow it
 - **LaTeX** in passages is rendered with KaTeX
 
 ## State persistence
