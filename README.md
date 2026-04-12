@@ -205,6 +205,8 @@ A control panel in the top-left corner of the graph lets you tune the view on th
 | **node size** | in-graph citations *(default)*<br>keyword hits<br>PageRank<br>betweenness | `in-graph citations` scales node size with the number of incoming edges visible in the graph. `keyword hits` scales by the count of keyword matches (regex + semantic). `PageRank` and `betweenness` use the corresponding centrality metric computed on the citation graph |
 | **spread** | slider (0.3× to 3.0×) | Rescales all node positions from the graph's centroid, stretching or compressing the layout without deforming it. Works with any layout mode |
 | **curved edges** | checkbox *(on by default)* | Toggle between curved (cubicBezier/curvedCW) and straight edge rendering |
+| **Export PNG** | button + scale selector (2x/3x/4x) | Export the current view as a high-resolution PNG. At 3x on a 1080p display, the output is 5760x3240 |
+| **Export SVG** | button | Export as a vector SVG file (lossless zoom, ideal for LaTeX figures) |
 | **nodes (legend)** | click rows to toggle | Hide/show nodes by status. When `--diff` or `--since` is used, an orange **new** row appears to toggle new papers |
 | **edges (legend)** | click rows to toggle | Hide/show edges by type (keyword-associated vs. bibliographic link) |
 

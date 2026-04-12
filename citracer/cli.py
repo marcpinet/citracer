@@ -339,17 +339,6 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         parsed = pdf_parser.parse(pdf, grobid_url=args.grobid_url)
-        root_metadata = {
-            "paper_id": make_paper_id(
-                doi=parsed.doi, arxiv_id=parsed.arxiv_id,
-                title=parsed.title or pdf.stem,
-            ),
-            "title": parsed.title or pdf.stem,
-            "authors": parsed.authors,
-            "year": parsed.year,
-            "arxiv_id": parsed.arxiv_id,
-            "doi": parsed.doi,
-        }
         # Pick an S2 lookup id. Priority: explicit CLI arxiv/doi > parsed.
         s2_lookup_id: str | None = None
         if args.arxiv:
@@ -360,6 +349,25 @@ def main(argv: list[str] | None = None) -> int:
             s2_lookup_id = f"ARXIV:{parsed.arxiv_id}"
         elif parsed.doi:
             s2_lookup_id = f"DOI:{parsed.doi}"
+
+        # Enrich root with S2 metadata (publication_date, abstract, etc.)
+        root_s2 = resolver.s2_by_id(s2_lookup_id) if s2_lookup_id else None
+        root_metadata = {
+            "paper_id": make_paper_id(
+                doi=parsed.doi, arxiv_id=parsed.arxiv_id,
+                title=parsed.title or pdf.stem,
+            ),
+            "title": parsed.title or pdf.stem,
+            "authors": parsed.authors,
+            "year": parsed.year,
+            "publication_date": root_s2.get("publication_date") if root_s2 else None,
+            "arxiv_id": parsed.arxiv_id,
+            "doi": parsed.doi,
+            "abstract": root_s2.get("abstract") if root_s2 else None,
+            "url": (f"https://arxiv.org/abs/{parsed.arxiv_id}" if parsed.arxiv_id
+                    else f"https://doi.org/{parsed.doi}" if parsed.doi
+                    else None),
+        }
         if not s2_lookup_id:
             logger.error(
                 "Reverse trace needs a DOI or arXiv id on the root paper, "

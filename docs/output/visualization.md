@@ -30,6 +30,8 @@ The top-left panel provides:
 | **Node size** | Scale by in-graph citations, keyword hits, PageRank, or betweenness |
 | **Spread** | Slider (0.3x to 3.0x) to stretch or compress the layout |
 | **Curved edges** | Toggle between curved and straight edge rendering |
+| **Export PNG** | Export the current view as a high-resolution raster image (2x, 3x, or 4x scale) |
+| **Export SVG** | Export as a vector file (lossless zoom, ideal for LaTeX figures and posters) |
 | **Nodes legend** | Click to show/hide nodes by status |
 | **Edges legend** | Click to show/hide keyword-associated or bibliographic edges |
 

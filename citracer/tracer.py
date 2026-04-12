@@ -163,16 +163,29 @@ def trace(
                 arxiv_id=parsed.arxiv_id,
                 title=parsed.title or pdf_path.stem,
             )
+            # Enrich the root node with S2 metadata (publication_date,
+            # abstract, citation_count, url) that GROBID doesn't provide.
+            root_s2 = None
+            if parsed.doi:
+                root_s2 = resolver._s2_by_id(f"DOI:{parsed.doi}")
+            if root_s2 is None and parsed.arxiv_id:
+                root_s2 = resolver._s2_by_id(f"ARXIV:{parsed.arxiv_id}")
             node = PaperNode(
                 paper_id=node_id,
                 title=parsed.title or pdf_path.stem,
                 authors=parsed.authors,
                 year=parsed.year,
+                publication_date=root_s2.get("publication_date") if root_s2 else None,
                 original_year=parsed.year,
                 arxiv_id=parsed.arxiv_id,
                 doi=parsed.doi,
+                abstract=root_s2.get("abstract") if root_s2 else None,
+                citation_count=root_s2.get("citation_count") if root_s2 else None,
                 depth=depth,
                 status="root",
+                url=(f"https://arxiv.org/abs/{parsed.arxiv_id}" if parsed.arxiv_id
+                     else f"https://doi.org/{parsed.doi}" if parsed.doi
+                     else None),
             )
 
         if node_id in graph.nodes:
@@ -448,6 +461,7 @@ def trace_reverse(
         title=root_metadata.get("title") or "(unknown)",
         authors=root_metadata.get("authors") or [],
         year=root_metadata.get("year"),
+        publication_date=root_metadata.get("publication_date"),
         original_year=root_metadata.get("year"),
         arxiv_id=root_metadata.get("arxiv_id"),
         doi=root_metadata.get("doi"),

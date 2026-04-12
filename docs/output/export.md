@@ -1,6 +1,15 @@
 # Export formats
 
-Citracer can export the graph for downstream analysis.
+## Visual exports (from the browser)
+
+The interactive graph includes **PNG** and **SVG** export buttons in the control panel:
+
+- **PNG**: raster image at 2x, 3x, or 4x the screen resolution. Good for slides and reports.
+- **SVG**: vector graphic with lossless zoom. Ideal for LaTeX figures, posters, and publications. Nodes, edges, labels, and arrowheads are all vector elements.
+
+Both export only the currently visible nodes and edges (respecting legend filters).
+
+## Data exports (from the CLI)
 
 ```bash
 citracer --pdf paper.pdf --keyword "..." --export graph.json --export graph.graphml

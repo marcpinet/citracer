@@ -224,6 +224,7 @@ def _node_payload(node: PaperNode) -> dict:
         "title": node.title or "(untitled)",
         "authors": node.authors,
         "year": node.year,
+        "publication_date": node.publication_date,
         "status": node.status,
         "depth": node.depth,
         "url": node.url,

@@ -198,6 +198,15 @@
     <summary style="cursor:pointer;font-size:11px;color:#888;user-select:none;">analytics</summary>
     <div id="citracer-analytics-body" style="font-size:11px;margin-top:4px;"></div>
   </details>
+  <div style="margin-top:8px;display:flex;align-items:center;gap:6px;">
+    <button id="citracer-export-png" title="Export as high-resolution PNG (raster)" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;color:#222;">PNG</button>
+    <select id="citracer-export-scale" title="Resolution multiplier for PNG" style="font-size:11px;padding:2px 4px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;">
+      <option value="2">2x</option>
+      <option value="3" selected>3x</option>
+      <option value="4">4x</option>
+    </select>
+    <button id="citracer-export-svg" title="Export as SVG (vector, lossless zoom)" style="font-size:11px;padding:3px 8px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;color:#222;">SVG</button>
+  </div>
   <div id="citracer-reset" title="clear saved layout, filters and positions">reset saved state</div>
 </div>
 
@@ -749,7 +758,9 @@
     let html = '<h3>' + escapeHtml(d.title) + '</h3>';
     html += '<div class="meta">';
     if (authors) html += escapeHtml(authors) + '<br>';
-    if (d.year) html += 'Year: ' + d.year + ' &middot; ';
+    if (d.publication_date) html += 'Published: ' + d.publication_date + ' &middot; ';
+    else if (d.year) html += 'Year: ' + d.year + ' &middot; ';
+    else html += 'Year: unknown &middot; ';
     if (d.citation_count != null) html += 'Citations: ' + d.citation_count + ' &middot; ';
     html += 'Status: <b>' + escapeHtml(d.status) + '</b>';
     if (d.is_new) html += ' <span style="background:#ff8c00;color:#fff;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:bold;">NEW</span>';
@@ -914,6 +925,159 @@
     spreadSlider.addEventListener('input', (ev) => {
       applySpread(parseFloat(ev.target.value));
       saveState();
+    });
+  }
+
+  // Export PNG — captures the canvas at high resolution
+  const exportBtn = document.getElementById('citracer-export-png');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => {
+      if (typeof network === 'undefined' || !network) return;
+      const scale = parseInt(document.getElementById('citracer-export-scale').value) || 3;
+      exportBtn.textContent = 'Rendering...';
+      exportBtn.disabled = true;
+
+      // Fit all visible nodes, then capture after the animation settles
+      network.fit();
+      setTimeout(() => {
+        try {
+          const srcCanvas = network.canvas.frame.canvas;
+          const w = srcCanvas.width;
+          const h = srcCanvas.height;
+
+          // Create a high-res offscreen canvas
+          const dst = document.createElement('canvas');
+          dst.width = w * scale;
+          dst.height = h * scale;
+          const ctx = dst.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+
+          // Draw the vis.js canvas scaled up
+          ctx.drawImage(srcCanvas, 0, 0, w, h, 0, 0, dst.width, dst.height);
+
+          // Trigger download
+          dst.toBlob((blob) => {
+            const a = document.createElement('a');
+            a.download = 'citracer-graph.png';
+            a.href = URL.createObjectURL(blob);
+            a.click();
+            URL.revokeObjectURL(a.href);
+            exportBtn.textContent = 'Export PNG';
+            exportBtn.disabled = false;
+          }, 'image/png');
+        } catch (e) {
+          console.error('PNG export failed:', e);
+          exportBtn.textContent = 'Export PNG';
+          exportBtn.disabled = false;
+          alert('PNG export failed. See console for details.');
+        }
+      }, 600);
+    });
+  }
+
+  // Export SVG — builds a vector graphic from the vis.js node/edge data
+  const svgBtn = document.getElementById('citracer-export-svg');
+  if (svgBtn) {
+    svgBtn.addEventListener('click', () => {
+      if (typeof network === 'undefined' || !network) return;
+      svgBtn.textContent = 'Rendering...';
+      svgBtn.disabled = true;
+
+      try {
+        const positions = network.getPositions();
+        const allNodeIds = Object.keys(positions);
+        if (!allNodeIds.length) { svgBtn.textContent = 'SVG'; svgBtn.disabled = false; return; }
+
+        // Compute bounding box
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        allNodeIds.forEach(id => {
+          const p = positions[id];
+          if (p.x < minX) minX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y > maxY) maxY = p.y;
+        });
+        const pad = 80;
+        minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+        const w = maxX - minX;
+        const h = maxY - minY;
+
+        // Status colors (same as Python STATUS_COLORS)
+        const colors = {
+          root: '#1f77b4', analyzed: '#2ca02c', no_match: '#9e9e9e',
+          unavailable: '#d62728', pending: '#cccccc', new: '#ff8c00',
+        };
+
+        let svg = '<?xml version="1.0" encoding="UTF-8"?>\n';
+        svg += '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="' + minX + ' ' + minY + ' ' + w + ' ' + h + '">\n';
+        svg += '<rect x="' + minX + '" y="' + minY + '" width="' + w + '" height="' + h + '" fill="white"/>\n';
+
+        // Arrowhead marker
+        svg += '<defs><marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto"><path d="M0,0 L10,3 L0,6 Z" fill="#444"/></marker>';
+        svg += '<marker id="arrow-sec" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto"><path d="M0,0 L10,3 L0,6 Z" fill="#5c87b5"/></marker></defs>\n';
+
+        // Draw edges
+        edges.forEach(e => {
+          if (e.hidden) return;
+          const from = positions[e.from];
+          const to = positions[e.to];
+          if (!from || !to) return;
+          const isSec = edgeType(e) === 'secondary';
+          const stroke = isSec ? '#5c87b5' : '#444444';
+          const strokeW = isSec ? 1.5 : 2.5;
+          const opacity = isSec ? 0.75 : 0.9;
+          const dash = isSec ? ' stroke-dasharray="6,6"' : '';
+          const marker = isSec ? 'url(#arrow-sec)' : 'url(#arrow)';
+
+          // Shorten line so arrowhead doesn't overlap the node circle
+          const dx = to.x - from.x, dy = to.y - from.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 1) return;
+          const toNode = nodes.get(e.to);
+          const r = (toNode && toNode.size) || 20;
+          const ratio = Math.max(0, (dist - r - 2) / dist);
+          const tx = from.x + dx * ratio, ty = from.y + dy * ratio;
+
+          svg += '<line x1="' + from.x.toFixed(1) + '" y1="' + from.y.toFixed(1) + '" x2="' + tx.toFixed(1) + '" y2="' + ty.toFixed(1) + '" stroke="' + stroke + '" stroke-width="' + strokeW + '" opacity="' + opacity + '"' + dash + ' marker-end="' + marker + '"/>\n';
+        });
+
+        // Draw nodes
+        allNodeIds.forEach(id => {
+          const n = nodes.get(id);
+          if (!n || n.hidden) return;
+          const p = positions[id];
+          const d = NODE_DETAILS[id] || {};
+          const effectiveStatus = d.is_new ? 'new' : (d.status || 'pending');
+          const fill = colors[effectiveStatus] || colors.pending;
+          const r = n.size || 20;
+          const borderW = effectiveStatus === 'root' ? 3 : 1;
+
+          svg += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="' + r + '" fill="' + fill + '" stroke="' + fill + '" stroke-width="' + borderW + '" opacity="0.9"/>\n';
+
+          // Label
+          const label = n.label || '';
+          if (label) {
+            const escaped = label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            svg += '<text x="' + p.x.toFixed(1) + '" y="' + (p.y + r + 14).toFixed(1) + '" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#222">' + escaped + '</text>\n';
+          }
+        });
+
+        svg += '</svg>';
+
+        // Download
+        const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+        const a = document.createElement('a');
+        a.download = 'citracer-graph.svg';
+        a.href = URL.createObjectURL(blob);
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (e) {
+        console.error('SVG export failed:', e);
+        alert('SVG export failed. See console for details.');
+      }
+      svgBtn.textContent = 'SVG';
+      svgBtn.disabled = false;
     });
   }
 
