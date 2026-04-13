@@ -882,17 +882,20 @@
           });
         }
         if (fixUpdates.length) nodes.update(fixUpdates);
+        applyCurvedEdges();
         network.fit();
       }, 120);
     } else {
       network.once("stabilizationIterationsDone", () => {
         network.setOptions({ physics: { enabled: false } });
         if (_safetyTimer) { clearTimeout(_safetyTimer); _safetyTimer = null; }
+        applyCurvedEdges();
         network.fit();
       });
 
       _safetyTimer = setTimeout(() => {
         network.setOptions({ physics: { enabled: false } });
+        applyCurvedEdges();
         network.fit();
       }, STABILIZATION_SAFETY_TIMEOUT_MS);
     }

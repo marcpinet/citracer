@@ -37,7 +37,7 @@ def _get_segmenter() -> pysbd.Segmenter:
     return _segmenter
 
 
-def _sentence_spans(text: str) -> list[tuple[int, int]]:
+def sentence_spans(text: str) -> list[tuple[int, int]]:
     """Return (start, end) char offsets for every sentence in `text`."""
     try:
         out = _get_segmenter().segment(text)
@@ -226,6 +226,7 @@ def search(
     use_semantic: bool = False,
     semantic_model: str | None = None,
     semantic_threshold: float | None = None,
+    spans: list[tuple[int, int]] | None = None,
 ) -> list[KeywordHit]:
     """Find all matches of `keyword` and associate inline refs.
 
@@ -236,13 +237,17 @@ def search(
     If `use_semantic` is True, a second pass runs after the regex: sentences
     that the regex didn't match are checked with a sentence-transformer
     embedding model, and those above the similarity threshold are added.
+
+    Pass pre-computed ``spans`` (from ``sentence_spans()``) to avoid
+    redundant pysbd calls when searching multiple keywords on the same text.
     """
     pattern = build_pattern(keyword)
     text = parsed.text
     hits: list[KeywordHit] = []
 
     use_sentences = context_window is None
-    spans = _sentence_spans(text) if use_sentences else []
+    if spans is None:
+        spans = sentence_spans(text) if use_sentences else []
 
     # Track which sentences the regex matched, for semantic dedup
     regex_matched_sentences: set[int] = set()

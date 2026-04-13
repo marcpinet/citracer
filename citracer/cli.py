@@ -182,6 +182,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cosine similarity threshold for semantic matching "
              "(default: 0.40, range 0.0-1.0). Implies --semantic.",
     )
+    p.add_argument(
+        "--no-refetch",
+        action="store_true",
+        help="Skip network resolution for papers already resolved in a "
+             "previous run (metadata + PDF cached locally). Dramatically "
+             "speeds up re-runs and avoids API rate limits.",
+    )
     p.add_argument("--no-open", action="store_true", help="Do not open the result in a browser.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
@@ -324,6 +331,7 @@ def main(argv: list[str] | None = None) -> int:
         supplied_pdfs=supplied_pdfs,
         enrich=enrich,
         email=email,
+        no_refetch=args.no_refetch,
     )
     try:
         pdf = resolve_source(
@@ -442,6 +450,7 @@ def main(argv: list[str] | None = None) -> int:
             supplied_pdfs=supplied_pdfs or None,
             enrich=enrich,
             email=email,
+            no_refetch=args.no_refetch,
             use_semantic=use_semantic,
             semantic_model=args.semantic_model,
             semantic_threshold=args.semantic_threshold,

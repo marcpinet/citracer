@@ -92,6 +92,7 @@ def build_manifest(
             "reverse": getattr(args, "reverse", False),
             "reverse_limit": getattr(args, "reverse_limit", 500),
             "enrich": getattr(args, "enrich", False),
+            "no_refetch": getattr(args, "no_refetch", False),
             "grobid_url": args.grobid_url,
         },
         "environment": {

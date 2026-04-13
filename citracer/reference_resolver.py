@@ -111,18 +111,22 @@ class ReferenceResolver:
         supplied_pdfs: dict[str, Path] | None = None,
         enrich: bool = False,
         email: str | None = None,
+        no_refetch: bool = False,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.pdf_dir = self.cache_dir / "pdfs"
         self.pdf_dir.mkdir(parents=True, exist_ok=True)
         self.meta_cache = MetadataCache(self.cache_dir / "metadata.sqlite")
+        self._no_refetch = no_refetch
         # One-time self-heal: drop any cached "search returned nothing"
         # entries from previous runs. Those can become stale when the
         # upstream service was briefly flaky, or when we fix a bug in our
         # search logic. Positive (non-null) entries are untouched.
-        purged = self.meta_cache.purge_negatives("arxsearch", "orev")
-        if purged:
-            logger.info("Purged %d stale negative cache entries", purged)
+        # Skipped when --no-refetch is active so we don't retry known misses.
+        if not no_refetch:
+            purged = self.meta_cache.purge_negatives("arxsearch", "orev")
+            if purged:
+                logger.info("Purged %d stale negative cache entries", purged)
         self.s2_api_key = s2_api_key
         # Semantic Scholar enforces ~1 req/sec for free API keys, and even
         # stricter throttling on the unauthenticated public endpoint.
@@ -278,6 +282,33 @@ class ReferenceResolver:
                 ref.authors = meta["authors"]
 
     def resolve(self, bib: BibEntry) -> ResolvedRef:
+        bib_cache_key = make_paper_id(
+            doi=bib.doi, arxiv_id=bib.arxiv_id, title=bib.title or bib.raw,
+        )
+
+        # Fast path: return cached result when --no-refetch is active.
+        if self._no_refetch:
+            hit, data = self.meta_cache.get("resolved", bib_cache_key)
+            if hit and data is not None:
+                pdf_path = Path(data["pdf_path"]) if data.get("pdf_path") else None
+                # Trust the cache only when the PDF is still on disk (or the
+                # paper was unavailable to begin with).
+                if pdf_path is None or pdf_path.exists():
+                    return ResolvedRef(
+                        paper_id=data["paper_id"],
+                        title=data["title"],
+                        authors=data.get("authors", []),
+                        year=data.get("year"),
+                        publication_date=data.get("publication_date"),
+                        doi=data.get("doi"),
+                        arxiv_id=data.get("arxiv_id"),
+                        openreview_id=data.get("openreview_id"),
+                        abstract=data.get("abstract"),
+                        citation_count=data.get("citation_count"),
+                        pdf_path=pdf_path,
+                        url=data.get("url"),
+                    )
+
         # Start with whatever GROBID extracted; merge enrichment in later.
         meta: dict = {
             "title": bib.title,
@@ -381,7 +412,7 @@ class ReferenceResolver:
         elif meta.get("doi"):
             url = f"https://doi.org/{meta['doi']}"
 
-        return ResolvedRef(
+        result = ResolvedRef(
             paper_id=paper_id,
             title=meta.get("title") or bib.raw[:120] or "(unknown)",
             authors=meta.get("authors") or bib.authors,
@@ -395,6 +426,25 @@ class ReferenceResolver:
             pdf_path=pdf_path,
             url=url,
         )
+
+        # Persist the full result so future --no-refetch runs can skip
+        # the entire resolution cascade for this paper.
+        self.meta_cache.set("resolved", bib_cache_key, {
+            "paper_id": result.paper_id,
+            "title": result.title,
+            "authors": result.authors,
+            "year": result.year,
+            "publication_date": result.publication_date,
+            "doi": result.doi,
+            "arxiv_id": result.arxiv_id,
+            "openreview_id": result.openreview_id,
+            "abstract": result.abstract,
+            "citation_count": result.citation_count,
+            "pdf_path": str(result.pdf_path) if result.pdf_path else None,
+            "url": result.url,
+        })
+
+        return result
 
     # ---------- public download helpers ----------
     # Used by source_resolver to download the root paper.

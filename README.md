@@ -129,6 +129,9 @@ citracer --pdf paper.pdf --keyword "attention" --diff output/old_graph.json
 citracer --pdf paper.pdf --keyword "attention" --diff output/old_graph.json --since 2025
 citracer --pdf paper.pdf --keyword "attention" --since 2025-06
 
+# Re-run a trace without re-resolving papers already cached locally
+citracer --pdf paper.pdf --keyword "attention" --depth 7 --no-refetch
+
 # Semantic matching: catch conceptual matches the regex misses
 # (requires: pip install citracer[semantic])
 citracer --pdf paper.pdf --keyword "channel-independent" --semantic
@@ -163,6 +166,7 @@ citracer --pdf paper.pdf --keyword "attention" --semantic --semantic-threshold 0
 | `--supply-pdf` | none | Supply a PDF for a specific node, as a local path or URL. Format: `ID=PATH` or `ID=URL` where ID is the `paper_id` from a previous graph export (e.g. `doi:10.1234/foo=paper.pdf` or `title:abc123=https://example.com/paper.pdf`). Repeat for multiple papers |
 | `--diff` | none | Compare against a previous citracer JSON export and highlight new nodes (papers not in the baseline) in orange. Useful for monitoring how a citation graph evolves over time |
 | `--since` | none | Highlight nodes published on or after this date (`YYYY` or `YYYY-MM`). Works alone (date filter) or with `--diff` (intersection: new AND recent). Uses S2 `publicationDate` for month precision when available, falls back to year |
+| `--no-refetch` | off | Skip network resolution for papers already resolved in a previous run (metadata + PDF cached locally). Dramatically speeds up re-runs and avoids API rate limits |
 | `--semantic` | off | Enable semantic matching: after the regex pass, scan remaining sentences with a [sentence-transformer](https://www.sbert.net/) embedding model to catch conceptual matches the regex missed (e.g. "univariate processing" for the keyword "channel-independent"). Requires `pip install citracer[semantic]` |
 | `--semantic-model` | `all-mpnet-base-v2` | Sentence-transformer model name for `--semantic`. Implies `--semantic` |
 | `--semantic-threshold` | `0.40` | Cosine similarity threshold for semantic matching (0.0-1.0). Lower = more recall, higher = more precision. Implies `--semantic` |

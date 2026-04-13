@@ -28,6 +28,7 @@
 | `--supply-pdf` | none | Supply a PDF for a node as local path or URL: `ID=PATH` or `ID=URL`. Repeat for multiple |
 | `--diff` | none | [Diff](diff.md) against a previous JSON export, highlighting new nodes in orange |
 | `--since` | none | Highlight nodes published on or after `YYYY` or `YYYY-MM`. Works alone or with `--diff` |
+| `--no-refetch` | off | Skip network resolution for papers already resolved in a previous run (metadata + PDF cached locally). Speeds up re-runs and avoids API rate limits |
 | `--semantic` | off | Enable [semantic matching](semantic.md). Requires `pip install citracer[semantic]` |
 | `--semantic-model` | `all-mpnet-base-v2` | Sentence-transformer model name. Implies `--semantic` |
 | `--semantic-threshold` | `0.40` | Cosine similarity threshold (0.0-1.0). Implies `--semantic` |

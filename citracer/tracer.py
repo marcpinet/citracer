@@ -85,6 +85,7 @@ def trace(
     supplied_pdfs: dict[str, Path] | None = None,
     enrich: bool = False,
     email: str | None = None,
+    no_refetch: bool = False,
     use_semantic: bool = False,
     semantic_model: str | None = None,
     semantic_threshold: float | None = None,
@@ -103,6 +104,7 @@ def trace(
         supplied_pdfs=supplied_pdfs,
         enrich=enrich,
         email=email,
+        no_refetch=no_refetch,
     )
 
     # parent_resolved is None for the root.
@@ -215,6 +217,11 @@ def trace(
             ))
 
         # Search each keyword; tag hits with their source keyword.
+        # Compute sentence spans once, reuse across all keywords.
+        spans = (
+            keyword_matcher.sentence_spans(parsed.text)
+            if context_window is None else None
+        )
         hits_by_kw: dict[str, list] = {}
         all_hits = []
         for kw in keywords:
@@ -223,6 +230,7 @@ def trace(
                 use_semantic=use_semantic,
                 semantic_model=semantic_model,
                 semantic_threshold=semantic_threshold,
+                spans=spans,
             )
             for h in kw_hits:
                 h.keyword = kw
