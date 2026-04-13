@@ -55,33 +55,94 @@ def add_secondary_edges(graph: TracerGraph) -> int:
 
     Matches are scoped to the graph we already built — no external API calls.
     """
+    # Pre-index nodes by DOI and arXiv ID for O(1) exact matching.
+    doi_to_id: dict[str, str] = {}
+    arxiv_to_id: dict[str, str] = {}
+    for node in graph.nodes.values():
+        d = normalize_doi(node.doi)
+        if d:
+            doi_to_id[d] = node.paper_id
+        a = normalize_arxiv_id(node.arxiv_id)
+        if a:
+            arxiv_to_id[a] = node.paper_id
+
+    # Pre-normalize target titles for fuzzy matching (once, not per source).
+    node_norm_titles: dict[str, str] = {}
+    for node in graph.nodes.values():
+        if node.title:
+            nt = normalize_title(node.title)
+            if nt and len(nt) >= CROSS_CITATION_MIN_TITLE_LEN:
+                node_norm_titles[node.paper_id] = nt
+
     added = 0
     for source in graph.nodes.values():
         if not source.bibliography:
-            continue  # only nodes we actually parsed have this
-        for target in graph.nodes.values():
-            if source.paper_id == target.paper_id:
-                continue
-            # Don't add a secondary edge if a primary one already exists.
-            if graph.has_edge(source.paper_id, target.paper_id, "primary"):
-                continue
-            match = _find_matching_bib(source.bibliography, target)
-            if match is None:
-                continue
-            # Backfill the target's year with the oldest plausible date,
-            # anchored on the target's first-seen year.
-            target.year = _better_year(target.original_year, target.year, match.year)
+            continue
+
+        def _add(target: PaperNode, bib: BibEntry) -> None:
+            nonlocal added
+            target.year = _better_year(target.original_year, target.year, bib.year)
             graph.add_edge(CitationEdge(
                 source_id=source.paper_id,
                 target_id=target.paper_id,
                 context=(
-                    f"bibliographic link (ref {match.key}: "
-                    f"{(match.title or match.raw or '')[:120]})"
+                    f"bibliographic link (ref {bib.key}: "
+                    f"{(bib.title or bib.raw or '')[:120]})"
                 ),
                 depth=max(source.depth, target.depth),
                 edge_type="secondary",
             ))
             added += 1
+
+        # Phase 1: exact ID matches via pre-built index — O(B) per source.
+        exact_targets: set[str] = set()
+        for bib in source.bibliography.values():
+            target_id = None
+            bd = normalize_doi(bib.doi)
+            if bd and bd in doi_to_id:
+                target_id = doi_to_id[bd]
+            if target_id is None:
+                ba = normalize_arxiv_id(bib.arxiv_id)
+                if ba and ba in arxiv_to_id:
+                    target_id = arxiv_to_id[ba]
+            if target_id is None or target_id == source.paper_id:
+                continue
+            exact_targets.add(target_id)
+            if graph.has_edge(source.paper_id, target_id, "primary"):
+                continue
+            _add(graph.nodes[target_id], bib)
+
+        # Phase 2: fuzzy title matching for targets not found via exact IDs.
+        # Pre-normalize bib titles once for this source.
+        bib_titles: list[tuple[BibEntry, str]] = []
+        for bib in source.bibliography.values():
+            raw = bib.title or bib.raw
+            if raw:
+                bib_titles.append((bib, normalize_title(raw)))
+
+        if not bib_titles:
+            continue
+
+        for target_id, target_title in node_norm_titles.items():
+            if target_id == source.paper_id:
+                continue
+            if target_id in exact_targets:
+                continue
+            if graph.has_edge(source.paper_id, target_id, "primary"):
+                continue
+            best_bib: BibEntry | None = None
+            best_score = 0.0
+            for bib, bib_title in bib_titles:
+                score = min(
+                    fuzz.token_set_ratio(target_title, bib_title),
+                    fuzz.token_sort_ratio(target_title, bib_title),
+                )
+                if score > best_score:
+                    best_score = score
+                    best_bib = bib
+            if best_score >= CROSS_CITATION_FUZZY_THRESHOLD and best_bib:
+                _add(graph.nodes[target_id], best_bib)
+
     return added
 
 
