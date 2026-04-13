@@ -150,7 +150,7 @@ citracer --pdf paper.pdf --keyword "attention" --semantic --semantic-threshold 0
 |---|---|---|
 | `--keyword` | *required* | Term (or concept) to trace through citations. By default, matches morphological variants via regex (e.g. "independent" also matches "independence", "independently"). With `--semantic`, also matches passages that express the same concept in different words. **Repeat** to trace multiple keywords at once |
 | `--match-mode` | `any` | In multi-keyword mode, `any` marks a paper as matched if at least one keyword is found (regex or semantic); `all` requires every keyword to match at least once |
-| `--depth` | `3` | Maximum recursion depth |
+| `--depth` | `3` | Maximum recursion depth (default `1` in reverse mode) |
 | `--context-window` | sentence-based | If set, fall back to a ±N character window for ref association instead of sentence-based |
 | `--consolidate` | off | Ask GROBID to consolidate each bibliographic reference against CrossRef (more accurate titles/DOIs but ~2-5s extra per PDF) |
 | `--grobid-workers` | `4` | Number of concurrent GROBID parse requests per BFS level |
@@ -413,7 +413,7 @@ pytest tests/ -v
 The test suite is hermetic, with no GROBID and no network. GROBID output is
 exercised via a pre-baked TEI fixture in `tests/fixtures/sample.tei.xml`,
 and every external API (arXiv, Semantic Scholar, OpenReview, PDF downloads)
-is mocked. Runs in under a second.
+is mocked. Runs in under 2 seconds.
 
 CI runs the suite on Python 3.10 / 3.11 / 3.12 via GitHub Actions on every
 push to `main`, every pull request, and on manual dispatch from the Actions

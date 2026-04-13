@@ -7,3 +7,4 @@ rapidfuzz>=3.6.0
 tqdm>=4.66.0
 pysbd>=0.3.4
 python-dotenv>=1.0.0
+networkx>=3.0

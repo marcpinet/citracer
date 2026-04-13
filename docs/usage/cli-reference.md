@@ -16,7 +16,7 @@
 | `--keyword` | *required* | Term or concept to trace. Matches morphological variants by default; with `--semantic`, also matches conceptual synonyms. Repeat for multiple keywords |
 | `--match-mode` | `any` | `any`: at least one keyword must match. `all`: every keyword must match |
 | `--depth` | `3` | Maximum recursion depth (default `1` in reverse mode) |
-| `--context-window` | sentence | If set to an integer, use ±N character window instead of sentence-based ref association |
+| `--context-window` | sentence-based | If set to an integer, use ±N character window instead of sentence-based ref association |
 | `--consolidate` | off | Ask GROBID to consolidate references against CrossRef (more accurate, ~2-5s extra per PDF) |
 | `--grobid-workers` | `4` | Concurrent GROBID parse requests per BFS level |
 | `--grobid-url` | `http://localhost:8070` | GROBID service URL |
