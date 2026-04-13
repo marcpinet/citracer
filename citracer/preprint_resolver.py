@@ -7,7 +7,26 @@ from __future__ import annotations
 import logging
 import re
 
+import requests
+
 logger = logging.getLogger(__name__)
+
+
+def _latest_biorxiv_version(doi: str, server: str = "biorxiv") -> int:
+    """Query the bioRxiv/medRxiv API for the latest revision number.
+    Falls back to 1 on any error (timeout, network, malformed JSON)."""
+    try:
+        r = requests.get(
+            f"https://api.biorxiv.org/details/{server}/{doi}/na/json",
+            timeout=10,
+        )
+        if r.ok:
+            entries = r.json().get("collection", [])
+            if entries:
+                return max(int(e.get("version", 1)) for e in entries)
+    except Exception:
+        pass
+    return 1
 
 
 def build_preprint_pdf_url(doi: str, oa_url: str | None = None) -> str | None:
@@ -21,9 +40,11 @@ def build_preprint_pdf_url(doi: str, oa_url: str | None = None) -> str | None:
     if doi_lower.startswith("10.1101/"):
         # Disambiguate via OA URL hint if available
         if oa_url and "medrxiv.org" in oa_url:
-            return f"https://www.medrxiv.org/content/{doi}v1.full.pdf"
+            v = _latest_biorxiv_version(doi, "medrxiv")
+            return f"https://www.medrxiv.org/content/{doi}v{v}.full.pdf"
         # Default to bioRxiv (larger repository)
-        return f"https://www.biorxiv.org/content/{doi}v1.full.pdf"
+        v = _latest_biorxiv_version(doi, "biorxiv")
+        return f"https://www.biorxiv.org/content/{doi}v{v}.full.pdf"
 
     # --- SSRN (DOI prefix 10.2139) ---
     if doi_lower.startswith("10.2139/"):
