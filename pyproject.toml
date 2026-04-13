@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "citracer"
-version = "1.6.0"
+version = "1.7.0"
 description = "Trace citation chains for any keyword across research papers."
 readme = "README.md"
 requires-python = ">=3.10"
