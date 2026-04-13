@@ -153,6 +153,9 @@ OPENALEX_MIN_INTERVAL_WITHOUT_EMAIL: float = 1.0
 #: OpenAlex request timeout (seconds).
 OPENALEX_TIMEOUT_SECONDS: float = 15.0
 
+#: Maximum number of DOIs per batch request to OpenAlex.
+OPENALEX_BATCH_SIZE: int = 50
+
 
 # ---------------------------------------------------------------------------
 # Tracer (tracer.py)

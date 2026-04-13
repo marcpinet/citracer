@@ -241,6 +241,42 @@ class ReferenceResolver:
         """Close the underlying metadata cache."""
         self.meta_cache.close()
 
+    def batch_enrich(self, refs: list[ResolvedRef]) -> None:
+        """Batch-enrich resolved references via OpenAlex.
+
+        Papers with a DOI are enriched in a single API call per 50 DOIs
+        (instead of one call per paper).  Title-only enrichment is handled
+        inline during ``resolve()``.
+        """
+        if not self._enricher:
+            return
+        doi_refs: list[tuple[ResolvedRef, str]] = []
+        for ref in refs:
+            if not ref.doi:
+                continue
+            if ref.abstract and ref.citation_count is not None:
+                continue
+            doi_refs.append((ref, ref.doi))
+
+        if not doi_refs:
+            return
+
+        enriched = self._enricher.enrich_batch_by_dois(
+            [doi for _, doi in doi_refs],
+        )
+        for ref, doi in doi_refs:
+            meta = enriched.get(doi)
+            if not meta:
+                continue
+            if not ref.abstract and meta.get("abstract"):
+                ref.abstract = meta["abstract"]
+            if ref.citation_count is None and meta.get("citation_count") is not None:
+                ref.citation_count = meta["citation_count"]
+            if not ref.year and meta.get("year"):
+                ref.year = meta["year"]
+            if not ref.authors and meta.get("authors"):
+                ref.authors = meta["authors"]
+
     def resolve(self, bib: BibEntry) -> ResolvedRef:
         # Start with whatever GROBID extracted; merge enrichment in later.
         meta: dict = {
@@ -280,18 +316,15 @@ class ReferenceResolver:
                         meta[k] = v
 
         # 4. Metadata enrichment via OpenAlex (if enabled)
+        # DOI-based enrichment is deferred to batch_enrich() which issues
+        # a single HTTP request for up to 50 DOIs at once.  Only title-
+        # based enrichment (papers without a DOI) still runs inline.
         if self._enricher:
             needs = (
                 not meta.get("abstract")
                 or not meta.get("citation_count")
                 or not meta.get("open_access_url")
             )
-            if needs and meta.get("doi"):
-                enriched = self._enricher.enrich_by_doi(meta["doi"])
-                if enriched:
-                    for k, v in enriched.items():
-                        if v and not meta.get(k):
-                            meta[k] = v
             if needs and not meta.get("doi") and meta.get("title"):
                 enriched = self._enricher.enrich_by_title(meta["title"])
                 if enriched:

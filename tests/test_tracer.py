@@ -53,6 +53,9 @@ class _FakeResolver:
     def close(self) -> None:
         pass
 
+    def batch_enrich(self, refs) -> None:
+        pass
+
     def resolve(self, bib: BibEntry) -> ResolvedRef:
         self.calls.append(bib.key)
         if bib.key not in self.by_key:

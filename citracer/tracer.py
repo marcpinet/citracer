@@ -281,6 +281,10 @@ def trace(
             pending,
         ))
 
+        # Batch-enrich all resolved refs via OpenAlex (1 API call per
+        # 50 DOIs instead of N sequential calls).
+        resolver.batch_enrich(resolved_list)
+
         for (ref_key, _bib, ctx), resolved in zip(pending, resolved_list):
             # Prefer the OLDEST known year for a paper — but only if the
             # candidate is within a small window of the arxiv/S2 year.

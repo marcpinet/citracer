@@ -17,6 +17,7 @@ from rapidfuzz import fuzz
 
 from .api_types import NormalizedMeta
 from .constants import (
+    OPENALEX_BATCH_SIZE,
     OPENALEX_MIN_INTERVAL_WITH_EMAIL,
     OPENALEX_MIN_INTERVAL_WITHOUT_EMAIL,
     OPENALEX_TIMEOUT_SECONDS,
@@ -145,6 +146,69 @@ class MetadataEnricher:
         self.cache.set("openalex", cache_key, meta)
         logger.info("OpenAlex enriched DOI %s (citations=%s)", doi, meta.get("citation_count"))
         return meta
+
+    def enrich_batch_by_dois(self, dois: list[str]) -> dict[str, NormalizedMeta]:
+        """Look up multiple works by DOI in a single OpenAlex API call.
+
+        OpenAlex supports pipe-separated DOI filters (up to 50 per request).
+        Returns a dict mapping normalized DOI to NormalizedMeta.
+        """
+        if not dois:
+            return {}
+
+        results: dict[str, NormalizedMeta] = {}
+        uncached: list[str] = []
+
+        for doi in dois:
+            cache_key = f"doi:{doi}"
+            hit, cached = self.cache.get("openalex", cache_key)
+            if hit:
+                if cached is not None:
+                    results[doi] = cached
+            else:
+                uncached.append(doi)
+
+        if not uncached:
+            return results
+
+        for i in range(0, len(uncached), OPENALEX_BATCH_SIZE):
+            chunk = uncached[i : i + OPENALEX_BATCH_SIZE]
+            doi_filter = "|".join(chunk)
+            url = (
+                f"{OPENALEX_BASE}/works?filter=doi:{doi_filter}"
+                f"&per_page={len(chunk)}"
+            )
+
+            data = self._get(url, f"batch {len(chunk)} DOIs")
+            if not data:
+                for d in chunk:
+                    self.cache.set("openalex", f"doi:{d}", None)
+                continue
+
+            found: set[str] = set()
+            for work in data.get("results") or []:
+                doi_raw = work.get("doi") or ""
+                norm = normalize_doi(
+                    doi_raw.replace("https://doi.org/", "")
+                    .replace("http://doi.org/", "")
+                )
+                if norm:
+                    meta = self._normalize(work)
+                    self.cache.set("openalex", f"doi:{norm}", meta)
+                    results[norm] = meta
+                    found.add(norm)
+                    logger.info(
+                        "OpenAlex enriched DOI %s (citations=%s)",
+                        norm,
+                        meta.get("citation_count"),
+                    )
+
+            # Negative-cache DOIs not returned by the API.
+            for d in chunk:
+                if d not in found:
+                    self.cache.set("openalex", f"doi:{d}", None)
+
+        return results
 
     def enrich_by_title(self, title: str) -> NormalizedMeta | None:
         """Search OpenAlex by title when no DOI is available."""
