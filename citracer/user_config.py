@@ -108,6 +108,28 @@ def clear_email() -> bool:
     return True
 
 
+def get_zotero_api_key() -> str | None:
+    """Return the Zotero API key from the user config, if any."""
+    return load_config().get("zotero_api_key")
+
+
+def set_zotero_api_key(key: str) -> Path:
+    """Persist the Zotero API key. Returns the config file path."""
+    data = load_config()
+    data["zotero_api_key"] = key
+    return save_config(data)
+
+
+def clear_zotero_api_key() -> bool:
+    """Remove the Zotero API key from the user config."""
+    data = load_config()
+    if "zotero_api_key" not in data:
+        return False
+    del data["zotero_api_key"]
+    save_config(data)
+    return True
+
+
 def clear_s2_api_key() -> bool:
     """Remove the Semantic Scholar API key from the user config.
 
