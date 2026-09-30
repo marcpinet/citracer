@@ -473,7 +473,7 @@
   // Compile one regex per keyword so we can colour matches individually.
   const KEYWORD_REGEXES = KEYWORD_SPECS.map(s => {
     try {
-      return { regex: new RegExp(s.pattern, 'gi'), color: s.color, keyword: s.keyword };
+      return { regex: new RegExp(s.pattern, s.flags || 'gi'), color: s.color, keyword: s.keyword };
     } catch (e) {
       console.warn('citracer: regex compile failed for', s.keyword, e);
       return null;

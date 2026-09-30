@@ -110,7 +110,8 @@ def _global_metrics(G: nx.DiGraph, graph: TracerGraph) -> dict:
 
 
 def _timeline(graph: TracerGraph) -> list[dict]:
-    """Per-year breakdown of keyword usage density.
+    """Per-year breakdown of keyword usage density among the papers whose
+    text was actually analyzed (``unavailable`` nodes are excluded).
 
     Returns a sorted list of dicts:
     ``{"year": int, "total": int, "with_keyword": int, "keyword_density": float}``
@@ -118,7 +119,9 @@ def _timeline(graph: TracerGraph) -> list[dict]:
     by_year: dict[int, dict] = defaultdict(lambda: {"total": 0, "with_keyword": 0})
 
     for node in graph.nodes.values():
-        if node.year is None:
+        # Unavailable papers were never read: counting them in the
+        # denominator would bias the keyword density downwards.
+        if node.year is None or node.status == "unavailable":
             continue
         by_year[node.year]["total"] += 1
         # A paper "has the keyword" if it is root/analyzed (keyword was found)

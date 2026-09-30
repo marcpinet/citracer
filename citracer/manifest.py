@@ -20,6 +20,34 @@ from .models import TracerGraph
 logger = logging.getLogger(__name__)
 
 
+#: CLI flags whose value must never be written to disk.
+_SECRET_FLAGS = ("--s2-api-key", "--email", "--zotero-api-key")
+
+
+def redact_argv(argv: list[str]) -> list[str]:
+    """Copy of ``argv`` with the values of secret flags replaced by ***.
+
+    Handles both ``--flag value`` and ``--flag=value`` forms, plus the
+    unambiguous prefixes argparse accepts (``--s2-api``)."""
+    out: list[str] = []
+    redact_next = False
+    for arg in argv:
+        if redact_next:
+            out.append("***")
+            redact_next = False
+            continue
+        name, eq, _value = arg.partition("=")
+        is_secret = len(name) > 3 and any(f.startswith(name) for f in _SECRET_FLAGS)
+        if is_secret and eq:
+            out.append(f"{name}=***")
+        elif is_secret:
+            out.append(arg)
+            redact_next = True
+        else:
+            out.append(arg)
+    return out
+
+
 def _citracer_version() -> str:
     """Return the installed citracer version, with fallback."""
     try:
@@ -34,7 +62,7 @@ def build_manifest(
     args,
     graph: TracerGraph,
     root_source: dict,
-    grobid_available: bool,
+    grobid_available: bool | None,
     s2_key_set: bool,
     email_set: bool,
     depth: int,
@@ -50,8 +78,9 @@ def build_manifest(
         The completed graph.
     root_source : dict
         ``{"type": "arxiv"|"doi"|"pdf"|"url", "value": "<raw input>"}``.
-    grobid_available : bool
-        Whether GROBID was reachable at trace time.
+    grobid_available : bool or None
+        Whether GROBID was reachable at trace time (None: not needed,
+        e.g. a reverse trace resolved entirely through Semantic Scholar).
     s2_key_set : bool
         Whether a Semantic Scholar API key was configured.
     email_set : bool
@@ -73,8 +102,9 @@ def build_manifest(
     # Status breakdown
     status_counts = Counter(n.status for n in graph.nodes.values())
 
-    # Reconstruct command
-    command = " ".join(sys.argv)
+    # Reconstruct command (secrets such as the S2 API key are masked: the
+    # manifest is written next to the graph and embedded in JSON exports).
+    command = " ".join(redact_argv(sys.argv))
 
     return {
         "citracer_version": _citracer_version(),

@@ -211,12 +211,28 @@ def _keyword_patterns_for_js(keywords: list[str] | str) -> list[dict]:
     for i, kw in enumerate(keywords):
         if not kw:
             continue
+        pattern = keyword_matcher.build_pattern(kw)
         out.append({
             "keyword": kw,
-            "pattern": keyword_matcher.build_pattern(kw).pattern,
+            "pattern": pattern.pattern,
+            "flags": keyword_matcher.js_flags(pattern),
             "color": KEYWORD_HIGHLIGHT_COLORS[i % len(KEYWORD_HIGHLIGHT_COLORS)],
         })
     return out
+
+
+def _script_json(value) -> str:
+    """JSON safe to embed inside an inline <script>.
+
+    ``json.dumps`` leaves "</script>" (and "<!--") untouched, so a title,
+    abstract or passage containing it would end the script block early and
+    let the rest be parsed as HTML. Escaping "<", ">" and "&" as unicode
+    escapes keeps the JSON value identical once parsed by JavaScript.
+    """
+    return (json.dumps(value)
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026"))
 
 
 def _node_payload(node: PaperNode) -> dict:
@@ -338,11 +354,11 @@ def _inject_overlay(
         "{{N_EDGES}}":                str(n_edges),
         "{{LEGEND_ROWS}}":            legend_rows_html,
         "{{EDGES_LEGEND}}":           edges_legend_html,
-        "{{NODE_DETAILS_JSON}}":      json.dumps(node_details),
-        "{{KEYWORD_SPECS_JSON}}":     json.dumps(kw_specs),
-        "{{DEFAULT_DISABLED_JSON}}":  json.dumps(default_disabled),
+        "{{NODE_DETAILS_JSON}}":      _script_json(node_details),
+        "{{KEYWORD_SPECS_JSON}}":     _script_json(kw_specs),
+        "{{DEFAULT_DISABLED_JSON}}":  _script_json(default_disabled),
         "{{DEFAULT_LAYOUT}}":         effective_layout,
-        "{{ANALYTICS_JSON}}":         json.dumps(analytics or {}),
+        "{{ANALYTICS_JSON}}":         _script_json(analytics or {}),
     }
 
     overlay = _load_overlay_template()
