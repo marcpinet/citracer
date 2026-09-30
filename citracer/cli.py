@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import sys
 import webbrowser
 from pathlib import Path
@@ -14,8 +15,9 @@ from . import analytics, pdf_parser, tracer, user_config, visualizer
 from .constants import GROBID_DEFAULT_WORKERS
 from .exporter import export_graph
 from .manifest import build_manifest, save_manifest
+from .http_client import TransientError, download_pdf
 from .reference_resolver import ReferenceResolver
-from .source_resolver import resolve_source
+from .source_resolver import resolve_source, source_s2_id
 from .utils import make_paper_id, setup_logging
 
 # Load .env from CWD (or any parent dir) into os.environ. Silent if absent.
@@ -78,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--grobid-workers",
         type=int,
         default=GROBID_DEFAULT_WORKERS,
-        help=f"Number of concurrent GROBID parse requests per BFS level "
+        help=f"Number of concurrent GROBID parse requests "
              f"(default: {GROBID_DEFAULT_WORKERS}). Set to 1 to disable "
              f"parallelism.",
     )
@@ -110,10 +112,47 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="PATH",
-        help="Export the graph to a file. Format is derived from the "
-             "extension: .json for the citracer JSON format, .graphml for "
-             "the standard GraphML (Gephi, networkx, yEd). Repeat to "
-             "export multiple formats in one run.",
+        help="Export to a file. Format is derived from the extension: "
+             ".json (citracer JSON graph), .graphml (Gephi, networkx, yEd), "
+             ".bib (BibTeX), .ris (Zotero / Mendeley / EndNote import) or "
+             ".csv (spreadsheet of the papers). Repeat to export multiple "
+             "formats in one run.",
+    )
+    p.add_argument(
+        "--export-status",
+        default=None,
+        metavar="STATUS[,STATUS]",
+        help="Only put papers with these statuses in the .bib / .ris / .csv "
+             "exports and the Zotero push: root, analyzed, no_match, "
+             "unavailable, new (e.g. 'root,analyzed'). Default: all papers.",
+    )
+    p.add_argument(
+        "--zotero",
+        action="store_true",
+        help="Add the traced papers to your Zotero library (Web API) in a "
+             "collection, with the keyword passages as child notes. Papers "
+             "already in the collection are skipped. Needs a Zotero API key "
+             "with write access (--zotero-api-key, ZOTERO_API_KEY or "
+             "'citracer config set-zotero-key').",
+    )
+    p.add_argument(
+        "--zotero-collection",
+        default=None,
+        metavar="NAME",
+        help="Zotero collection to fill (created if missing). Default: "
+             "'citracer: <keywords>'. Implies --zotero.",
+    )
+    p.add_argument(
+        "--zotero-library",
+        default=None,
+        metavar="users/ID|groups/ID",
+        help="Zotero library to write to. Default: the API key owner's "
+             "personal library.",
+    )
+    p.add_argument(
+        "--zotero-api-key",
+        default=None,
+        help="Zotero API key (https://www.zotero.org/settings/keys).",
     )
     p.add_argument(
         "--enrich",
@@ -215,30 +254,60 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    # Verify GROBID is reachable before starting. The pymupdf fallback exists
-    # but produces much lower-quality output (author strings get parsed as
-    # titles, etc.) so we surface this loudly and let the user opt in.
-    grobid_available = _check_grobid(args.grobid_url)
-    if not grobid_available:
-        bar = "=" * 70
-        logger.warning(bar)
-        logger.warning("GROBID is not reachable at %s", args.grobid_url)
-        logger.warning(bar)
-        logger.warning("citracer needs GROBID for accurate bibliography parsing.")
-        logger.warning("Start it with:")
-        logger.warning("    docker run --rm -p 8070:8070 lfoppiano/grobid:0.9.0")
-        logger.warning("")
-        logger.warning("Without GROBID, citracer will fall back to pymupdf + regex,")
-        logger.warning("which degrades quality significantly (references may be")
-        logger.warning("mis-parsed, titles may show up as author lists, etc.).")
-        logger.warning(bar)
-        try:
-            # `input()` is the one legitimate place we need stdin here.
-            ans = input("  Continue with the fallback parser anyway? [y/N] ").strip().lower()
-        except EOFError:
-            ans = ""
-        if ans not in ("y", "yes"):
-            logger.error("Aborted by user (no GROBID).")
+    keywords: list[str] = args.keyword
+    kw_display = ", ".join(f"'{k}'" for k in keywords)
+
+    export_statuses: set[str] | None = None
+    if args.export_status:
+        export_statuses = {s.strip() for s in args.export_status.split(",") if s.strip()}
+        unknown = export_statuses - _EXPORT_STATUSES
+        if unknown:
+            logger.error("--export-status: unknown status(es) %s (expected %s)",
+                         ", ".join(sorted(unknown)), ", ".join(sorted(_EXPORT_STATUSES)))
+            return 2
+
+    use_zotero = args.zotero or args.zotero_collection is not None
+    zotero_key = None
+    if use_zotero:
+        zotero_key = (
+            args.zotero_api_key
+            or os.environ.get("ZOTERO_API_KEY")
+            or user_config.get_zotero_api_key()
+        )
+        if not zotero_key:
+            logger.error(
+                "--zotero needs a Zotero API key with write access "
+                "(https://www.zotero.org/settings/keys): pass --zotero-api-key, "
+                "set ZOTERO_API_KEY, or run: citracer config set-zotero-key <key>"
+            )
+            return 2
+
+    # Mode-dependent default for --depth. argparse gives us None when the
+    # user didn't pass it explicitly.
+    if args.depth is None:
+        depth = 1 if args.reverse else 3
+    else:
+        depth = args.depth
+
+    # --semantic-model and --semantic-threshold imply --semantic
+    use_semantic = args.semantic or args.semantic_model is not None or args.semantic_threshold is not None
+    if use_semantic and args.reverse:
+        logger.warning("--semantic is not supported in reverse trace mode (ignored)")
+        use_semantic = False
+
+    # A reverse trace started from an arXiv id / DOI / known URL needs
+    # neither the root PDF nor GROBID: Semantic Scholar has everything.
+    reverse_s2_id = (
+        source_s2_id(doi=args.doi, arxiv_id=args.arxiv, url=args.url)
+        if args.reverse else None
+    )
+
+    # Verify GROBID is reachable before starting (only when a PDF will be
+    # parsed). None in the manifest means "not needed".
+    grobid_available: bool | None = None
+    if not reverse_s2_id:
+        grobid_available = _ensure_grobid(args.grobid_url)
+        if grobid_available is None:
             return 3
 
     # Resolve the S2 API key with the following priority:
@@ -282,29 +351,21 @@ def main(argv: list[str] | None = None) -> int:
         pid = pid.strip()
         ppath = ppath.strip()
         if ppath.startswith("http://") or ppath.startswith("https://"):
-            # Download URL to cache
-            import re as _re
-            safe = _re.sub(r"[^\w\-.]", "_", pid)[:80]
+            # Download URL to cache (streamed, size-capped, atomic)
+            safe = re.sub(r"[^\w\-.]", "_", pid)[:80]
             dest = pdf_cache / f"supplied_{safe}.pdf"
             if not (dest.exists() and dest.stat().st_size > 0):
                 logger.info("Downloading supplied PDF for %s ...", pid)
-                try:
-                    r = requests.get(
-                        ppath, timeout=60,
-                        headers={"User-Agent": "citracer"},
-                        allow_redirects=True,
-                    )
-                except Exception as e:
-                    logger.error("Failed to download %s: %s", ppath, e)
-                    return 2
-                if r.status_code != 200 or not r.content.startswith(b"%PDF"):
-                    logger.error(
-                        "Download failed for %s (HTTP %s, starts with %r)",
-                        ppath, r.status_code, r.content[:10],
-                    )
-                    return 2
-                dest.write_bytes(r.content)
-                logger.info("Downloaded supplied PDF: %s -> %s", ppath, dest.name)
+            try:
+                got = download_pdf(
+                    ppath, dest, timeout=60, headers={"User-Agent": "citracer"},
+                )
+            except TransientError as e:
+                logger.error("Failed to download %s: %s", ppath, e)
+                return 2
+            if got is None:
+                logger.error("Download failed for %s (not a PDF)", ppath)
+                return 2
             supplied_pdfs[pid] = dest
         else:
             p = Path(ppath).expanduser()
@@ -324,7 +385,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     enrich = args.enrich or bool(email)
 
-    # Resolve the root source into a local PDF path (download if needed).
+    if use_semantic:
+        try:
+            from .keyword_matcher import _get_semantic_model
+            _get_semantic_model(args.semantic_model)
+        except ImportError as e:
+            logger.error("%s", e)
+            return 2
+
+    # One resolver for the whole run: the root download and the trace share
+    # its caches, in-run memo and circuit breakers.
     resolver = ReferenceResolver(
         cache_dir=args.cache_dir,
         s2_api_key=s2_key,
@@ -334,140 +404,107 @@ def main(argv: list[str] | None = None) -> int:
         no_refetch=args.no_refetch,
     )
     try:
-        pdf = resolve_source(
-            pdf=args.pdf,
-            doi=args.doi,
-            arxiv_id=args.arxiv,
-            url=args.url,
-            resolver=resolver,
-        )
-    except ValueError as e:
-        logger.error("Could not resolve source: %s", e)
-        return 2
+        if args.reverse:
+            depth = max(1, depth)
+            if depth > 2:
+                logger.warning(
+                    "Reverse trace at depth %d can explode combinatorially; "
+                    "consider --depth 1 or 2.", depth,
+                )
+            root_metadata = None
+            s2_lookup_id = reverse_s2_id
+            if reverse_s2_id:
+                root_metadata = _root_metadata_from_s2(resolver, reverse_s2_id)
+            if root_metadata is None:
+                # Fall back to the PDF header (needs GROBID).
+                if grobid_available is None:
+                    grobid_available = _ensure_grobid(args.grobid_url)
+                    if grobid_available is None:
+                        return 3
+                try:
+                    pdf = resolve_source(
+                        pdf=args.pdf, doi=args.doi, arxiv_id=args.arxiv,
+                        url=args.url, resolver=resolver,
+                    )
+                except ValueError as e:
+                    logger.error("Could not resolve source: %s", e)
+                    return 2
+                s2_lookup_id, root_metadata = _root_metadata_from_pdf(
+                    resolver, pdf, args.grobid_url, s2_lookup_id,
+                )
+            if not s2_lookup_id:
+                logger.error(
+                    "Reverse trace needs a DOI or arXiv id on the root paper, "
+                    "but none was found. Provide --doi or --arxiv explicitly.",
+                )
+                return 4
 
-    keywords: list[str] = args.keyword
-    kw_display = ", ".join(f"'{k}'" for k in keywords)
-
-    # Mode-dependent default for --depth. argparse gives us None when the
-    # user didn't pass it explicitly.
-    if args.depth is None:
-        depth = 1 if args.reverse else 3
-    else:
-        depth = args.depth
-
-    # --semantic-model and --semantic-threshold imply --semantic
-    use_semantic = args.semantic or args.semantic_model is not None or args.semantic_threshold is not None
-    if use_semantic:
-        try:
-            from .keyword_matcher import _get_semantic_model
-            _get_semantic_model(args.semantic_model)
-        except ImportError as e:
-            logger.error("%s", e)
-            return 2
-    if use_semantic and args.reverse:
-        logger.warning("--semantic is not supported in reverse trace mode (ignored)")
-        use_semantic = False
-
-    if args.reverse:
-        # Reverse trace: we need the root paper's S2-compatible id and
-        # enough metadata for the root node, but we don't need the
-        # bibliography or body text. Parse the PDF header only.
-        depth = max(1, depth)
-        if depth > 2:
-            logger.warning(
-                "Reverse trace at depth %d can explode combinatorially; "
-                "consider --depth 1 or 2.", depth,
+            logger.info(
+                "Reverse tracing keyword(s) %s from %s via S2 citations "
+                "(depth=%d, match=%s, per-level-limit=%d)",
+                kw_display, s2_lookup_id, depth, args.match_mode, args.reverse_limit,
             )
-
-        parsed = pdf_parser.parse(pdf, grobid_url=args.grobid_url)
-        # Pick an S2 lookup id. Priority: explicit CLI arxiv/doi > parsed.
-        s2_lookup_id: str | None = None
-        if args.arxiv:
-            s2_lookup_id = f"ARXIV:{args.arxiv}"
-        elif args.doi:
-            s2_lookup_id = f"DOI:{args.doi}"
-        elif parsed.arxiv_id:
-            s2_lookup_id = f"ARXIV:{parsed.arxiv_id}"
-        elif parsed.doi:
-            s2_lookup_id = f"DOI:{parsed.doi}"
-
-        # Enrich root with S2 metadata (publication_date, abstract, etc.)
-        root_s2 = resolver.s2_by_id(s2_lookup_id) if s2_lookup_id else None
-        root_metadata = {
-            "paper_id": make_paper_id(
-                doi=parsed.doi, arxiv_id=parsed.arxiv_id,
-                title=parsed.title or pdf.stem,
-            ),
-            "title": parsed.title or pdf.stem,
-            "authors": parsed.authors,
-            "year": parsed.year,
-            "publication_date": root_s2.get("publication_date") if root_s2 else None,
-            "arxiv_id": parsed.arxiv_id,
-            "doi": parsed.doi,
-            "abstract": root_s2.get("abstract") if root_s2 else None,
-            "url": (f"https://arxiv.org/abs/{parsed.arxiv_id}" if parsed.arxiv_id
-                    else f"https://doi.org/{parsed.doi}" if parsed.doi
-                    else None),
-        }
-        if not s2_lookup_id:
-            logger.error(
-                "Reverse trace needs a DOI or arXiv id on the root paper, "
-                "but none was found. Provide --doi or --arxiv explicitly.",
+            graph = tracer.trace_reverse(
+                root_paper_id=s2_lookup_id,
+                root_metadata=root_metadata,
+                keyword=keywords,
+                max_depth=depth,
+                cache_dir=args.cache_dir,
+                s2_api_key=s2_key,
+                match_mode=args.match_mode,
+                per_level_limit=args.reverse_limit,
+                resolver=resolver,
             )
-            return 4
-
-        logger.info(
-            "Reverse tracing keyword(s) %s from %s via S2 citations "
-            "(depth=%d, match=%s, per-level-limit=%d)",
-            kw_display, s2_lookup_id, depth, args.match_mode, args.reverse_limit,
-        )
-        graph = tracer.trace_reverse(
-            root_paper_id=s2_lookup_id,
-            root_metadata=root_metadata,
-            keyword=keywords,
-            max_depth=depth,
-            cache_dir=args.cache_dir,
-            s2_api_key=s2_key,
-            match_mode=args.match_mode,
-            per_level_limit=args.reverse_limit,
-        )
-    else:
-        logger.info(
-            "Tracing keyword(s) %s from %s (depth=%d, match=%s)",
-            kw_display, pdf.name, depth, args.match_mode,
-        )
-        graph = tracer.trace(
-            root_pdf=pdf,
-            keyword=keywords,
-            max_depth=depth,
-            cache_dir=args.cache_dir,
-            grobid_url=args.grobid_url,
-            context_window=args.context_window,
-            s2_api_key=s2_key,
-            grobid_workers=args.grobid_workers,
-            consolidate_citations=args.consolidate,
-            match_mode=args.match_mode,
-            supplied_pdfs=supplied_pdfs or None,
-            enrich=enrich,
-            email=email,
-            no_refetch=args.no_refetch,
-            use_semantic=use_semantic,
-            semantic_model=args.semantic_model,
-            semantic_threshold=args.semantic_threshold,
-        )
+        else:
+            try:
+                pdf = resolve_source(
+                    pdf=args.pdf, doi=args.doi, arxiv_id=args.arxiv,
+                    url=args.url, resolver=resolver,
+                )
+            except ValueError as e:
+                logger.error("Could not resolve source: %s", e)
+                return 2
+            logger.info(
+                "Tracing keyword(s) %s from %s (depth=%d, match=%s)",
+                kw_display, pdf.name, depth, args.match_mode,
+            )
+            graph = tracer.trace(
+                root_pdf=pdf,
+                keyword=keywords,
+                max_depth=depth,
+                cache_dir=args.cache_dir,
+                grobid_url=args.grobid_url,
+                context_window=args.context_window,
+                s2_api_key=s2_key,
+                grobid_workers=args.grobid_workers,
+                consolidate_citations=args.consolidate,
+                match_mode=args.match_mode,
+                supplied_pdfs=supplied_pdfs or None,
+                enrich=enrich,
+                email=email,
+                no_refetch=args.no_refetch,
+                use_semantic=use_semantic,
+                semantic_model=args.semantic_model,
+                semantic_threshold=args.semantic_threshold,
+                resolver=resolver,
+            )
+    finally:
+        resolver.close()
 
     logger.info("Graph: %d nodes, %d edges", len(graph.nodes), len(graph.edges))
 
     # Apply diff / --since highlighting (before analytics, so status is untouched)
     diff_mode = bool(args.diff or args.since)
     if diff_mode:
-        from .diff import apply_diff, load_baseline, parse_since
+        from .diff import apply_diff, load_baseline, load_baseline_aliases, parse_since
 
         baseline_node_ids = None
         baseline_edge_keys = None
+        baseline_aliases = None
         if args.diff:
             try:
                 baseline_node_ids, baseline_edge_keys = load_baseline(args.diff)
+                baseline_aliases = load_baseline_aliases(args.diff)
                 logger.info("Loaded baseline with %d node(s) from %s",
                             len(baseline_node_ids), args.diff)
             except (FileNotFoundError, ValueError) as e:
@@ -485,6 +522,7 @@ def main(argv: list[str] | None = None) -> int:
             baseline_node_ids=baseline_node_ids,
             baseline_edge_keys=baseline_edge_keys,
             since=args.since,
+            baseline_aliases=baseline_aliases,
         )
         logger.info(
             "Diff: %d new node(s), %d new edge(s)",
@@ -538,9 +576,13 @@ def main(argv: list[str] | None = None) -> int:
     # Optional graph exports (JSON / GraphML).
     for export_path in args.export or []:
         try:
-            export_graph(graph, export_path, manifest=manifest, analytics=analytics_data)
+            export_graph(graph, export_path, manifest=manifest,
+                         analytics=analytics_data, statuses=export_statuses)
         except Exception as e:
             logger.error("Export to %s failed: %s", export_path, e)
+
+    if use_zotero:
+        _push_to_zotero(args, graph, keywords, zotero_key, export_statuses)
 
     if not args.no_open:
         webbrowser.open(out_path.resolve().as_uri())
@@ -588,6 +630,20 @@ def _handle_config(argv: list[str]) -> int:
     sub.add_parser(
         "clear-email",
         help="Remove the saved email.",
+    )
+
+    p_zkey = sub.add_parser(
+        "set-zotero-key",
+        help="Save a Zotero API key (with write access) for --zotero.",
+    )
+    p_zkey.add_argument("key", help="Your Zotero API key.")
+    sub.add_parser(
+        "get-zotero-key",
+        help="Print the saved Zotero API key (masked).",
+    )
+    sub.add_parser(
+        "clear-zotero-key",
+        help="Remove the saved Zotero API key.",
     )
 
     sub.add_parser(
@@ -656,6 +712,27 @@ def _handle_config(argv: list[str]) -> int:
             logger.info("No email was set.")
         return 0
 
+    if args.action == "set-zotero-key":
+        path = user_config.set_zotero_api_key(args.key.strip())
+        logger.info("Saved Zotero API key to %s (masked: %s)",
+                    path, user_config.mask_secret(args.key.strip()))
+        return 0
+
+    if args.action == "get-zotero-key":
+        key = user_config.get_zotero_api_key()
+        if key is None:
+            logger.info("No Zotero API key saved.")
+            return 1
+        logger.info("Zotero API key: %s", user_config.mask_secret(key))
+        return 0
+
+    if args.action == "clear-zotero-key":
+        if user_config.clear_zotero_api_key():
+            logger.info("Cleared Zotero API key from user config.")
+        else:
+            logger.info("No Zotero API key was set.")
+        return 0
+
     if args.action == "path":
         # logger.info would prefix with timestamps; this one is meant to
         # be machine-parseable so we print directly.
@@ -664,6 +741,116 @@ def _handle_config(argv: list[str]) -> int:
 
     parser.print_help()
     return 2
+
+
+_EXPORT_STATUSES = {"root", "analyzed", "no_match", "unavailable", "new"}
+
+
+def _push_to_zotero(args, graph, keywords: list[str], api_key: str,
+                    statuses: set[str] | None) -> None:
+    from . import zotero
+    from .bibliography import select_papers
+
+    papers = select_papers(graph, statuses)
+    collection = args.zotero_collection or f"citracer: {', '.join(keywords)}"
+    try:
+        client = zotero.ZoteroClient(api_key, library=args.zotero_library)
+        result = zotero.push_papers(client, papers, collection, keywords)
+    except zotero.ZoteroError as e:
+        logger.error("Zotero export failed: %s", e)
+        return
+    logger.info(
+        "Zotero: %d paper(s) added to collection %r (%d already there, %d note(s))",
+        result.created, collection, result.skipped, result.notes,
+    )
+    if result.failed:
+        logger.warning("Zotero rejected %d paper(s)", len(result.failed))
+
+
+def _ensure_grobid(grobid_url: str) -> bool | None:
+    """Check GROBID; if it's down, ask whether to continue with the
+    fallback parser. Returns availability, or None if the user aborted."""
+    if _check_grobid(grobid_url):
+        return True
+    # The pymupdf fallback exists but produces much lower-quality output
+    # (author strings get parsed as titles, etc.) so we surface this loudly
+    # and let the user opt in.
+    bar = "=" * 70
+    logger.warning(bar)
+    logger.warning("GROBID is not reachable at %s", grobid_url)
+    logger.warning(bar)
+    logger.warning("citracer needs GROBID for accurate bibliography parsing.")
+    logger.warning("Start it with:")
+    logger.warning("    docker run --rm -p 8070:8070 lfoppiano/grobid:0.9.0")
+    logger.warning("")
+    logger.warning("Without GROBID, citracer will fall back to pymupdf + regex,")
+    logger.warning("which degrades quality significantly (references may be")
+    logger.warning("mis-parsed, titles may show up as author lists, etc.).")
+    logger.warning(bar)
+    try:
+        # `input()` is the one legitimate place we need stdin here.
+        ans = input("  Continue with the fallback parser anyway? [y/N] ").strip().lower()
+    except EOFError:
+        ans = ""
+    if ans not in ("y", "yes"):
+        logger.error("Aborted by user (no GROBID).")
+        return None
+    return False
+
+
+def _root_metadata_from_s2(resolver: ReferenceResolver, s2_id: str) -> dict | None:
+    """Root node metadata for a reverse trace, straight from S2."""
+    meta = resolver.s2_by_id(s2_id)
+    if not meta or not meta.get("title"):
+        return None
+    arxiv_id, doi = meta.get("arxiv_id"), meta.get("doi")
+    if s2_id.upper().startswith("ARXIV:"):
+        arxiv_id = arxiv_id or s2_id.split(":", 1)[1]
+    elif s2_id.upper().startswith("DOI:"):
+        doi = doi or s2_id.split(":", 1)[1]
+    return {
+        "paper_id": make_paper_id(doi=doi, arxiv_id=arxiv_id, title=meta["title"]),
+        "title": meta["title"],
+        "authors": meta.get("authors") or [],
+        "year": meta.get("year"),
+        "publication_date": meta.get("publication_date"),
+        "arxiv_id": arxiv_id,
+        "doi": doi,
+        "abstract": meta.get("abstract"),
+        "citation_count": meta.get("citation_count"),
+        "url": (f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id
+                else f"https://doi.org/{doi}" if doi else None),
+    }
+
+
+def _root_metadata_from_pdf(
+    resolver: ReferenceResolver, pdf: Path, grobid_url: str, s2_lookup_id: str | None,
+) -> tuple[str | None, dict]:
+    """Root node metadata for a reverse trace from the PDF header (plus S2
+    enrichment when an id is known). Returns (s2_lookup_id, metadata)."""
+    parsed = pdf_parser.parse(pdf, grobid_url=grobid_url)
+    if not s2_lookup_id:
+        if parsed.arxiv_id:
+            s2_lookup_id = f"ARXIV:{parsed.arxiv_id}"
+        elif parsed.doi:
+            s2_lookup_id = f"DOI:{parsed.doi}"
+    root_s2 = resolver.s2_by_id(s2_lookup_id) if s2_lookup_id else None
+    return s2_lookup_id, {
+        "paper_id": make_paper_id(
+            doi=parsed.doi, arxiv_id=parsed.arxiv_id,
+            title=parsed.title or pdf.stem,
+        ),
+        "title": parsed.title or pdf.stem,
+        "authors": parsed.authors,
+        "year": parsed.year,
+        "publication_date": root_s2.get("publication_date") if root_s2 else None,
+        "arxiv_id": parsed.arxiv_id,
+        "doi": parsed.doi,
+        "abstract": root_s2.get("abstract") if root_s2 else None,
+        "url": (f"https://arxiv.org/abs/{parsed.arxiv_id}" if parsed.arxiv_id
+                else f"https://doi.org/{parsed.doi}" if parsed.doi
+                else None),
+    }
 
 
 def _check_grobid(grobid_url: str, timeout: float = 3.0) -> bool:
