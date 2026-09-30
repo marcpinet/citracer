@@ -19,6 +19,7 @@ whose embedding is close enough to the keyword. Results are unioned.
 from __future__ import annotations
 import hashlib
 import logging
+import os
 import re
 import threading
 from bisect import bisect_right
@@ -391,6 +392,12 @@ def _get_semantic_model(model_name: str | None = None):
     with _semantic_lock:
         if _semantic_model is not None and _semantic_model_name == name:
             return _semantic_model
+        # sentence-transformers only needs PyTorch. Without this, transformers
+        # also imports TensorFlow / JAX when they are installed: ~20s slower,
+        # and a hard crash with Keras 3 ("Keras 3 ... not yet supported").
+        # setdefault: an explicit user setting still wins.
+        os.environ.setdefault("USE_TF", "0")
+        os.environ.setdefault("USE_FLAX", "0")
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError:

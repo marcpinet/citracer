@@ -366,3 +366,14 @@ class TestSecondPass:
         assert build_pattern("k-means").search("k means clustering") is not None
         # S2 citation contexts (reverse mode) keep typographic hyphens.
         assert build_pattern("channel-independent").search("channel‐independent") is not None
+
+
+def test_semantic_import_disables_tensorflow_backend(monkeypatch):
+    # transformers must not import TensorFlow (crashes with Keras 3).
+    from citracer import keyword_matcher as km
+    monkeypatch.delenv("USE_TF", raising=False)
+    monkeypatch.setattr(km, "_semantic_model", None)
+    monkeypatch.setitem(__import__("sys").modules, "sentence_transformers", None)
+    with pytest.raises(ImportError):
+        km._get_semantic_model()
+    assert __import__("os").environ["USE_TF"] == "0"
