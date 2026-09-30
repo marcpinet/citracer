@@ -23,6 +23,9 @@ def resolver(tmp_path: Path) -> ReferenceResolver:
         p.write_bytes(b"%PDF fake")
         return p
     r._download_arxiv = MagicMock(side_effect=fake_download_arxiv)
+    # No test may reach the network through the DOI download cascade.
+    r._download_scihub = MagicMock(return_value=None)
+    r._try_preprint_download = MagicMock(return_value=None)
     return r
 
 
@@ -199,38 +202,66 @@ class TestAllFail:
 # 429 backoff
 # ---------------------------------------------------------------------------
 
+class _Resp:
+    def __init__(self, status, data=None, headers=None):
+        self.status_code = status
+        self._data = data or {}
+        self.headers = headers or {}
+    def json(self):
+        return self._data
+
+
+class _FakeSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = 0
+    def get(self, url, **_kwargs):
+        self.calls += 1
+        return self.responses.pop(0)
+    post = get
+
+
 class TestS2Backoff:
     def test_429_retried_then_success(self, resolver, monkeypatch):
-        calls = {"n": 0}
-
-        class _Resp:
-            def __init__(self, status, data=None):
-                self.status_code = status
-                self._data = data or {}
-            def json(self):
-                return self._data
-
-        def fake_get(url, **_kwargs):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                return _Resp(429)
-            return _Resp(200, {
-                "title": "Found",
-                "authors": [{"name": "Me"}],
-                "year": 2021,
-                "externalIds": {},
-            })
-
-        # Monkeypatch the requests module inside reference_resolver
         import citracer.reference_resolver as rr
-        monkeypatch.setattr(rr.requests, "get", fake_get)
+        fake = _FakeSession([
+            _Resp(429),
+            _Resp(200, {"title": "Found", "authors": [{"name": "Me"}],
+                        "year": 2021, "externalIds": {}}),
+        ])
+        monkeypatch.setattr(rr, "session", lambda: fake)
         # Speed up backoff for the test
         monkeypatch.setattr(rr, "S2_429_BACKOFF_DELAYS", (0.0, 0.0, 0.0))
 
         result = resolver._s2_get("http://x", "test")
         assert result is not None
         assert result["title"] == "Found"
-        assert calls["n"] == 2  # one 429, then success
+        assert fake.calls == 2  # one 429, then success
+
+    def test_retry_after_is_honoured(self, resolver, monkeypatch):
+        import citracer.reference_resolver as rr
+        fake = _FakeSession([_Resp(429, headers={"Retry-After": "7"}), _Resp(200, {"x": 1})])
+        monkeypatch.setattr(rr, "session", lambda: fake)
+        monkeypatch.setattr(rr, "S2_429_BACKOFF_DELAYS", (0.0, 0.0))
+        sleeps = []
+        monkeypatch.setattr(rr.time, "sleep", lambda s: sleeps.append(s))
+        assert resolver._s2_get("http://x", "test") == {"x": 1}
+        assert 7.0 in sleeps
+
+    def test_404_is_a_genuine_miss(self, resolver, monkeypatch):
+        import citracer.reference_resolver as rr
+        monkeypatch.setattr(rr, "session", lambda: _FakeSession([_Resp(404)]))
+        with resolver._track_transient() as t:
+            assert resolver._s2_get("http://x", "test") is None
+        assert t["failed"] is False
+
+    def test_5xx_exhaustion_is_transient(self, resolver, monkeypatch):
+        import citracer.reference_resolver as rr
+        monkeypatch.setattr(rr, "session", lambda: _FakeSession([_Resp(503)] * 3))
+        monkeypatch.setattr(rr, "S2_429_BACKOFF_DELAYS", (0.0, 0.0, 0.0))
+        with resolver._track_transient() as t:
+            assert resolver._s2_get("http://x", "test") is None
+        assert t["failed"] is True
 
 
 # ---------------------------------------------------------------------------

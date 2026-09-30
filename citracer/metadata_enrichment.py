@@ -17,11 +17,14 @@ from rapidfuzz import fuzz
 
 from .api_types import NormalizedMeta
 from .constants import (
+    METADATA_CACHE_TTL_SECONDS,
+    NEGATIVE_CACHE_TTL_SECONDS,
     OPENALEX_BATCH_SIZE,
     OPENALEX_MIN_INTERVAL_WITH_EMAIL,
     OPENALEX_MIN_INTERVAL_WITHOUT_EMAIL,
     OPENALEX_TIMEOUT_SECONDS,
 )
+from .http_client import TransientError, is_transient_status, session
 from .metadata_cache import MetadataCache
 from .utils import normalize_doi, normalize_title
 
@@ -78,21 +81,36 @@ class MetadataEnricher:
         return p
 
     def _get(self, url: str, label: str) -> dict | None:
+        """Return the decoded JSON on HTTP 200, None on a genuine client
+        error (e.g. 404). Raises TransientError on network errors, timeouts,
+        429 and 5xx — those must never be cached as "not found"."""
         self._throttle()
         try:
-            r = requests.get(
+            r = session().get(
                 url,
                 params=self._params(),
                 headers={"User-Agent": "citracer"},
                 timeout=OPENALEX_TIMEOUT_SECONDS,
             )
-        except Exception as e:
+        except requests.RequestException as e:
             logger.warning("OpenAlex %s failed: %s", label, e)
-            return None
+            raise TransientError(str(e)) from e
+        if is_transient_status(r.status_code):
+            logger.warning("OpenAlex %s -> HTTP %s", label, r.status_code)
+            raise TransientError(f"HTTP {r.status_code}")
         if r.status_code != 200:
             logger.debug("OpenAlex %s -> HTTP %s", label, r.status_code)
             return None
-        return r.json()
+        try:
+            return r.json()
+        except ValueError as e:
+            raise TransientError(f"invalid JSON: {e}") from e
+
+    def _cache_get(self, key: str):
+        return self.cache.get(
+            "openalex", key,
+            ttl=METADATA_CACHE_TTL_SECONDS, negative_ttl=NEGATIVE_CACHE_TTL_SECONDS,
+        )
 
     def _normalize(self, work: dict) -> NormalizedMeta:
         """Extract NormalizedMeta fields from an OpenAlex Work object."""
@@ -133,13 +151,17 @@ class MetadataEnricher:
     def enrich_by_doi(self, doi: str) -> NormalizedMeta | None:
         """Look up a work by DOI on OpenAlex."""
         cache_key = f"doi:{doi}"
-        hit, cached = self.cache.get("openalex", cache_key)
+        hit, cached = self._cache_get(cache_key)
         if hit:
             return cached
 
         url = f"{OPENALEX_BASE}/works/doi:{doi}"
-        data = self._get(url, f"doi {doi}")
+        try:
+            data = self._get(url, f"doi {doi}")
+        except TransientError:
+            return None
         if not data or data.get("error"):
+            self.cache.set("openalex", cache_key, None)
             return None
 
         meta = self._normalize(data)
@@ -161,7 +183,7 @@ class MetadataEnricher:
 
         for doi in dois:
             cache_key = f"doi:{doi}"
-            hit, cached = self.cache.get("openalex", cache_key)
+            hit, cached = self._cache_get(cache_key)
             if hit:
                 if cached is not None:
                     results[doi] = cached
@@ -179,10 +201,11 @@ class MetadataEnricher:
                 f"&per_page={len(chunk)}"
             )
 
-            data = self._get(url, f"batch {len(chunk)} DOIs")
+            try:
+                data = self._get(url, f"batch {len(chunk)} DOIs")
+            except TransientError:
+                continue  # retry next time: a failed call proves nothing
             if not data:
-                for d in chunk:
-                    self.cache.set("openalex", f"doi:{d}", None)
                 continue
 
             found: set[str] = set()
@@ -213,17 +236,21 @@ class MetadataEnricher:
     def enrich_by_title(self, title: str) -> NormalizedMeta | None:
         """Search OpenAlex by title when no DOI is available."""
         cache_key = f"title:{normalize_title(title)[:120]}"
-        hit, cached = self.cache.get("openalex", cache_key)
+        hit, cached = self._cache_get(cache_key)
         if hit:
             return cached
 
         url = f"{OPENALEX_BASE}/works?search={requests.utils.quote(title[:300])}&per_page=1"
-        data = self._get(url, f"search {title[:60]!r}")
+        try:
+            data = self._get(url, f"search {title[:60]!r}")
+        except TransientError:
+            return None
         if not data:
             return None
 
         results = data.get("results") or []
         if not results:
+            self.cache.set("openalex", cache_key, None)
             return None
 
         work = results[0]
@@ -239,6 +266,7 @@ class MetadataEnricher:
                 "OpenAlex title search: no good match for %r (best=%s)",
                 title[:60], score,
             )
+            self.cache.set("openalex", cache_key, None)
             return None
 
         meta = self._normalize(work)

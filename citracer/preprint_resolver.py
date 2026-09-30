@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import re
 
-import requests
+from .http_client import session
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ def _latest_biorxiv_version(doi: str, server: str = "biorxiv") -> int:
     """Query the bioRxiv/medRxiv API for the latest revision number.
     Falls back to 1 on any error (timeout, network, malformed JSON)."""
     try:
-        r = requests.get(
+        r = session().get(
             f"https://api.biorxiv.org/details/{server}/{doi}/na/json",
             timeout=10,
         )

@@ -87,13 +87,16 @@ class TestBatchEnrichByDois:
         assert hit is True
         assert cached is None
 
-    def test_api_failure_caches_negatives(self, enricher, cache):
-        with patch.object(enricher, "_get", return_value=None):
+    def test_api_failure_does_not_cache_negatives(self, enricher, cache):
+        # A timeout / 429 / 5xx proves nothing about the DOI: caching it as
+        # "not found" would hide it forever.
+        from citracer.http_client import TransientError
+        with patch.object(enricher, "_get", side_effect=TransientError("timeout")):
             result = enricher.enrich_batch_by_dois(["10.1/x"])
 
         assert result == {}
         hit, _ = cache.get("openalex", "doi:10.1/x")
-        assert hit is True
+        assert hit is False
 
     def test_partial_results(self, enricher):
         response = {

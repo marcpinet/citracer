@@ -11,11 +11,8 @@ import logging
 import re
 from pathlib import Path
 
-import requests
-
-from .constants import PDF_DOWNLOAD_TIMEOUT_SECONDS
 from .reference_resolver import ReferenceResolver
-from .utils import normalize_arxiv_id, normalize_doi
+from .utils import arxiv_id_from_doi, normalize_arxiv_id, normalize_doi
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +127,34 @@ def resolve_source(
 
     # Unreachable — the "exactly one" check above catches this.
     raise ValueError("No source provided.")
+
+
+def source_s2_id(
+    doi: str | None = None,
+    arxiv_id: str | None = None,
+    url: str | None = None,
+) -> str | None:
+    """Semantic Scholar id (``ARXIV:x`` / ``DOI:y``) for a source given as
+    an arXiv id, a DOI or a recognised URL, without downloading anything.
+    None when the source can't be mapped (e.g. an OpenReview URL)."""
+    if url:
+        u = url.strip()
+        m = _ARXIV_URL_RE.match(u)
+        if m:
+            arxiv_id = m.group("id")
+        else:
+            m = _DOI_URL_RE.match(u) or _BIORXIV_URL_RE.match(u) or _MEDRXIV_URL_RE.match(u)
+            if m:
+                doi = m.group("doi")
+            else:
+                m = _SSRN_URL_RE.match(u)
+                if m:
+                    doi = f"10.2139/ssrn.{m.group('id')}"
+    aid = normalize_arxiv_id(arxiv_id) or arxiv_id_from_doi(doi)
+    if aid:
+        return f"ARXIV:{aid}"
+    d = normalize_doi(doi)
+    return f"DOI:{d}" if d else None
 
 
 def _download_by_doi(doi: str, resolver: ReferenceResolver) -> Path:
