@@ -7,9 +7,10 @@ Replaces the previous scheme of one JSON file per cache entry. Benefits:
 - **Atomic writes.** No more half-written JSONs on crash.
 - **Thread-safe.** A single connection shared across threads, guarded by
   a lock — the workload is low enough that the lock is never a bottleneck.
-- **Negative caching.** ``None`` is a legitimate value, so resolver
-  failures ("we searched arxiv and found nothing") are cached and not
-  retried on every run.
+- **Negative caching.** ``None`` is a legitimate value, so genuine misses
+  ("we searched arxiv and found nothing") are cached and not retried on
+  every run. Callers pass a TTL to ``get`` so such entries (and stale
+  metadata like citation counts) eventually expire.
 
 PDFs are still stored on disk in ``cache/pdfs/`` — SQLite is a poor fit
 for megabytes of binary data.
@@ -52,18 +53,32 @@ class MetadataCache:
             """
         )
 
-    def get(self, source: str, key: str) -> tuple[bool, Any]:
+    def get(
+        self,
+        source: str,
+        key: str,
+        *,
+        ttl: float | None = None,
+        negative_ttl: float | None = None,
+    ) -> tuple[bool, Any]:
         """Return (hit, value). `hit` is True iff the key is in the cache.
         `value` can be None when a negative result ("we looked and there's
-        nothing there") was cached."""
+        nothing there") was cached.
+
+        ``ttl`` / ``negative_ttl`` (seconds) make positive / negative entries
+        older than that count as misses. None means "never expires"."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT data FROM metadata WHERE source = ? AND key = ?",
+                "SELECT data, (julianday('now') - julianday(created_at)) * 86400.0 "
+                "FROM metadata WHERE source = ? AND key = ?",
                 (source, key),
             ).fetchone()
         if row is None:
             return (False, None)
-        raw = row[0]
+        raw, age = row
+        max_age = ttl if raw is not None else negative_ttl
+        if max_age is not None and age is not None and age > max_age:
+            return (False, None)
         if raw is None:
             return (True, None)
         try:
