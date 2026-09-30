@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pyvis.network import Network
 
-from . import keyword_matcher
+from . import bibliography, keyword_matcher
 from .constants import NODE_INITIAL_SIZE, NODE_ROOT_MIN_SIZE
 from .models import PaperNode, TracerGraph
 
@@ -74,6 +74,10 @@ def render(
 
     # Detail payload keyed by node id, used by the click-info panel.
     node_details: dict[str, dict] = {}
+    # Per-paper bibliography entries, so the page can export the papers
+    # currently visible (BibTeX / RIS / CSV) exactly like --export does.
+    cite_keys = bibliography.citation_keys(bibliography.select_papers(graph))
+    node_metrics = (analytics or {}).get("node_metrics", {})
 
     for node in graph.nodes.values():
         if node.is_new:
@@ -84,6 +88,9 @@ def render(
         payload = _node_payload(node)
         payload["depth_level"] = node.depth
         payload["year_level"] = year_levels[node.paper_id]
+        payload["bibtex"] = bibliography.bibtex_entry(node, cite_keys[node.paper_id], keywords)
+        payload["ris"] = bibliography.ris_record(node, keywords)
+        payload["csv"] = bibliography.csv_row(node, node_metrics.get(node.paper_id))
         node_details[node.paper_id] = payload
 
         # Initial size is a placeholder — actual size is computed in JS based
@@ -359,6 +366,7 @@ def _inject_overlay(
         "{{DEFAULT_DISABLED_JSON}}":  _script_json(default_disabled),
         "{{DEFAULT_LAYOUT}}":         effective_layout,
         "{{ANALYTICS_JSON}}":         _script_json(analytics or {}),
+        "{{CSV_COLUMNS_JSON}}":       _script_json(bibliography.CSV_COLUMNS),
     }
 
     overlay = _load_overlay_template()

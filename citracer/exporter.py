@@ -1,6 +1,9 @@
 """Serialize a TracerGraph to standard graph formats.
 
-Supported formats:
+Bibliography formats (``.bib``, ``.ris``, ``.csv``: one entry per paper)
+are produced by :mod:`citracer.bibliography` through the same entry point.
+
+Supported graph formats:
   - **json**: a self-describing citracer-native format. Includes all node
     and edge metadata (status, depth, year, hits, edge type, context, ...).
     Useful for downstream scripting or human inspection.
@@ -19,6 +22,7 @@ import logging
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
+from . import bibliography
 from .models import TracerGraph
 
 logger = logging.getLogger(__name__)
@@ -30,22 +34,39 @@ def export_graph(
     fmt: str | None = None,
     manifest: dict | None = None,
     analytics: dict | None = None,
+    statuses: set[str] | None = None,
 ) -> Path:
     """Write ``graph`` to ``path`` in the format derived from the file
-    extension (``.json`` or ``.graphml``), or from the explicit ``fmt``
-    argument if given.
+    extension, or from the explicit ``fmt`` argument if given.
+
+    Graph formats: ``.json``, ``.graphml``. Bibliography formats (one entry
+    per paper, filtered by ``statuses`` if given): ``.bib``, ``.ris``,
+    ``.csv``.
     """
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     fmt = (fmt or out.suffix.lstrip(".")).lower()
+    keywords = ((manifest or {}).get("parameters") or {}).get("keywords")
 
     if fmt == "json":
         _export_json(graph, out, manifest=manifest, analytics=analytics)
     elif fmt == "graphml":
         _export_graphml(graph, out, analytics=analytics)
+    elif fmt in ("bib", "bibtex", "ris", "csv"):
+        papers = bibliography.select_papers(graph, statuses)
+        if fmt == "csv":
+            # BOM: Excel otherwise decodes UTF-8 CSV as the local codepage.
+            out.write_text("﻿" + bibliography.to_csv(papers, analytics),
+                           encoding="utf-8", newline="")
+        elif fmt == "ris":
+            out.write_text(bibliography.to_ris(papers, keywords), encoding="utf-8")
+        else:
+            out.write_text(bibliography.to_bibtex(papers, keywords), encoding="utf-8")
+        logger.info("Exported %d paper(s) to %s", len(papers), out)
+        return out
     else:
         raise ValueError(
-            f"Unknown export format {fmt!r}. Use 'json' or 'graphml'."
+            f"Unknown export format {fmt!r}. Use 'json', 'graphml', 'bib', 'ris' or 'csv'."
         )
     logger.info("Exported graph (%d nodes, %d edges) to %s",
                 len(graph.nodes), len(graph.edges), out)

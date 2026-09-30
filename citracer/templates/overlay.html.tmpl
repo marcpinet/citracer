@@ -228,6 +228,12 @@
         <option value="4">4x</option>
       </select>
     </div>
+    <div class="export-group" title="Export the papers currently visible (respects the legend filters and hidden nodes)">
+      <span style="font-size:11px;color:#888;">papers</span>
+      <button id="citracer-export-bib" title="BibTeX (.bib) of the visible papers">BibTeX</button>
+      <button id="citracer-export-ris" title="RIS (.ris) of the visible papers: imports into Zotero, Mendeley, EndNote">RIS</button>
+      <button id="citracer-export-csv" title="Spreadsheet (.csv) of the visible papers">CSV</button>
+    </div>
     <span id="citracer-reset" title="clear saved layout, filters and positions">reset</span>
   </div>
 </div>
@@ -254,6 +260,7 @@
 (function() {
   const NODE_DETAILS = {{NODE_DETAILS_JSON}};
   const ANALYTICS = {{ANALYTICS_JSON}};
+  const CSV_COLUMNS = {{CSV_COLUMNS_JSON}};
   const KEYWORD_SPECS = {{KEYWORD_SPECS_JSON}};  // [{keyword, pattern, color}, ...]
   const disabledStatus = new Set({{DEFAULT_DISABLED_JSON}});
   // Edge type filter: secondary (bibliographic) edges start hidden
@@ -1240,6 +1247,42 @@
   }
 
   // Export SVG — builds a vector graphic from the vis.js node/edge data
+  // --- Bibliography export of the visible papers -------------------------
+  function visiblePaperIds() {
+    const visible = new Set();
+    if (typeof nodes !== 'undefined') nodes.forEach(n => { if (!n.hidden) visible.add(n.id); });
+    return Object.keys(NODE_DETAILS).filter(id => visible.has(id));
+  }
+  function downloadText(text, filename, mime) {
+    const blob = new Blob([text], { type: mime + ';charset=utf-8' });
+    const a = document.createElement('a');
+    a.download = filename;
+    a.href = URL.createObjectURL(blob);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  function csvCell(v) {
+    const s = v == null ? '' : String(v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  const PAPER_EXPORTS = {
+    'citracer-export-bib': () => downloadText(
+      visiblePaperIds().map(id => NODE_DETAILS[id].bibtex).join('\n\n') + '\n',
+      'citracer-papers.bib', 'application/x-bibtex'),
+    'citracer-export-ris': () => downloadText(
+      visiblePaperIds().map(id => NODE_DETAILS[id].ris).join('\n\n') + '\n',
+      'citracer-papers.ris', 'application/x-research-info-systems'),
+    'citracer-export-csv': () => downloadText(
+      // BOM so Excel reads the file as UTF-8
+      '\ufeff' + [CSV_COLUMNS].concat(visiblePaperIds().map(id => NODE_DETAILS[id].csv))
+        .map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n',
+      'citracer-papers.csv', 'text/csv'),
+  };
+  Object.entries(PAPER_EXPORTS).forEach(([id, fn]) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.addEventListener('click', fn);
+  });
+
   const svgBtn = document.getElementById('citracer-export-svg');
   if (svgBtn) {
     svgBtn.addEventListener('click', () => {
