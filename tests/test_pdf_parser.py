@@ -36,8 +36,11 @@ class TestHeader:
     def test_year(self, parsed):
         assert parsed.year == 2024
 
-    def test_doi(self, parsed):
-        assert parsed.doi == "10.48550/arxiv.9999.99999"
+    def test_arxiv_doi_folded_into_arxiv_id(self, parsed):
+        # The fixture's DOI is the arXiv DataCite DOI 10.48550/arxiv.9999.99999:
+        # it identifies the same preprint as the arXiv id, so it is dropped
+        # to avoid a second "doi:..." identity for the same paper.
+        assert parsed.doi is None
 
     def test_arxiv_id(self, parsed):
         assert parsed.arxiv_id == "9999.99999"

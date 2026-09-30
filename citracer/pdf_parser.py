@@ -5,21 +5,31 @@ while recording the character offset of every inline <ref type="bibr">,
 so the keyword matcher can later associate hits with citations by position.
 """
 from __future__ import annotations
+import gzip
+import hashlib
 import logging
 import re
+import time
 from pathlib import Path
 
-import requests
 from lxml import etree
 
-from .constants import FIGURE_NOISE_MATH_CHAR_THRESHOLD, GROBID_TIMEOUT_SECONDS
+from .constants import (
+    FIGURE_NOISE_MATH_CHAR_THRESHOLD,
+    GROBID_503_BACKOFF_DELAYS,
+    GROBID_TIMEOUT_SECONDS,
+)
+from .http_client import session, write_atomic
 from .models import BibEntry, InlineRef, ParsedPaper
-from .utils import normalize_arxiv_id, normalize_doi
+from .utils import arxiv_id_from_doi, normalize_arxiv_id, normalize_doi
 
 logger = logging.getLogger(__name__)
 
 TEI_NS = "http://www.tei-c.org/ns/1.0"
 NS = {"tei": TEI_NS}
+
+# Publication years we extract from TEI dates (1600-2099).
+_YEAR_RE = re.compile(r"\b(1[6-9]|20)\d{2}\b")
 
 
 class GrobidError(RuntimeError):
@@ -30,6 +40,8 @@ def parse(
     pdf_path: str | Path,
     grobid_url: str = "http://localhost:8070",
     consolidate_citations: bool = False,
+    consolidate_header: bool = True,
+    cache_dir: str | Path | None = None,
 ) -> ParsedPaper:
     """Parse a PDF, trying GROBID first then falling back to pymupdf.
 
@@ -39,10 +51,19 @@ def parse(
         consolidate_citations: If True, ask GROBID to consolidate each
             bibliographic reference against CrossRef (much more accurate
             titles/DOIs, but ~2-5s extra per PDF).
+        consolidate_header: Ask GROBID to consolidate the paper's own
+            header (title/DOI). Only useful for the root paper: every other
+            node gets its metadata from the reference resolver.
+        cache_dir: If set, GROBID's TEI output is cached under
+            ``<cache_dir>/tei/`` keyed by the PDF's content hash, so re-runs
+            skip GROBID entirely.
     """
     pdf_path = Path(pdf_path)
     try:
-        tei = _call_grobid(pdf_path, grobid_url, consolidate_citations)
+        tei = _cached_grobid(
+            pdf_path, grobid_url, consolidate_citations, consolidate_header,
+            Path(cache_dir) if cache_dir is not None else None,
+        )
         return _parse_tei(tei)
     except Exception as e:
         logger.warning("GROBID failed for %s (%s); falling back to pymupdf", pdf_path.name, e)
@@ -51,17 +72,67 @@ def parse(
 
 # ---------- GROBID ----------
 
-def _call_grobid(pdf_path: Path, grobid_url: str, consolidate_citations: bool) -> bytes:
-    url = f"{grobid_url.rstrip('/')}/api/processFulltextDocument"
+def _tei_cache_path(
+    pdf_path: Path, cache_dir: Path, consolidate_citations: bool, consolidate_header: bool,
+) -> Path:
+    h = hashlib.sha256()
     with open(pdf_path, "rb") as f:
-        files = {"input": (pdf_path.name, f, "application/pdf")}
-        data = {
-            "consolidateHeader": "1",
-            "consolidateCitations": "1" if consolidate_citations else "0",
-            "includeRawCitations": "1",
-            "segmentSentences": "0",
-        }
-        resp = requests.post(url, files=files, data=data, timeout=GROBID_TIMEOUT_SECONDS)
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    flags = f"h{int(consolidate_header)}c{int(consolidate_citations)}"
+    return cache_dir / "tei" / f"{h.hexdigest()[:32]}_{flags}.tei.xml.gz"
+
+
+def _cached_grobid(
+    pdf_path: Path,
+    grobid_url: str,
+    consolidate_citations: bool,
+    consolidate_header: bool,
+    cache_dir: Path | None,
+) -> bytes:
+    cache_path = None
+    if cache_dir is not None:
+        cache_path = _tei_cache_path(pdf_path, cache_dir, consolidate_citations, consolidate_header)
+        if cache_path.exists():
+            try:
+                return gzip.decompress(cache_path.read_bytes())
+            except (OSError, EOFError) as e:
+                logger.debug("corrupt TEI cache %s (%s), re-parsing", cache_path.name, e)
+    tei = _call_grobid(pdf_path, grobid_url, consolidate_citations, consolidate_header)
+    if cache_path is not None:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        write_atomic(cache_path, gzip.compress(tei))
+    return tei
+
+
+def _call_grobid(
+    pdf_path: Path,
+    grobid_url: str,
+    consolidate_citations: bool,
+    consolidate_header: bool = True,
+) -> bytes:
+    url = f"{grobid_url.rstrip('/')}/api/processFulltextDocument"
+    data = {
+        "consolidateHeader": "1" if consolidate_header else "0",
+        "consolidateCitations": "1" if consolidate_citations else "0",
+        "includeRawCitations": "1",
+        "segmentSentences": "0",
+    }
+    # GROBID answers 503 when all its workers are busy: retry with backoff
+    # instead of degrading to the fallback parser.
+    delays = (0.0,) + tuple(GROBID_503_BACKOFF_DELAYS)
+    resp = None
+    for attempt, wait in enumerate(delays):
+        if wait:
+            time.sleep(wait)
+        with open(pdf_path, "rb") as f:
+            files = {"input": (pdf_path.name, f, "application/pdf")}
+            resp = session().post(url, files=files, data=data, timeout=GROBID_TIMEOUT_SECONDS)
+        if resp.status_code != 503:
+            break
+        logger.debug("GROBID busy (503) for %s, attempt %d/%d",
+                     pdf_path.name, attempt + 1, len(delays))
+    assert resp is not None
     if resp.status_code != 200:
         raise GrobidError(f"HTTP {resp.status_code}: {resp.text[:200]}")
     return resp.content
@@ -199,9 +270,15 @@ def _extract_header(root) -> tuple[str | None, list[str], str | None, str | None
     date_el = header.find(".//tei:publicationStmt/tei:date", NS)
     if date_el is not None:
         when = date_el.get("when") or _text(date_el) or ""
-        m = re.search(r"\b(19|20)\d{2}\b", when)
+        m = _YEAR_RE.search(when)
         if m:
             year = int(m.group(0))
+
+    # An arXiv DataCite DOI is just the arXiv id in disguise.
+    doi_arxiv = arxiv_id_from_doi(doi)
+    if doi_arxiv:
+        arxiv_id = arxiv_id or doi_arxiv
+        doi = None
 
     return title, authors, doi, arxiv_id, year
 
@@ -230,7 +307,7 @@ def _extract_bibliography(root) -> dict[str, BibEntry]:
         date_el = bib.find(".//tei:date", NS)
         if date_el is not None:
             when = date_el.get("when") or _text(date_el) or ""
-            m = re.search(r"\b(19|20)\d{2}\b", when)
+            m = _YEAR_RE.search(when)
             if m:
                 year = int(m.group(0))
 
@@ -243,6 +320,11 @@ def _extract_bibliography(root) -> dict[str, BibEntry]:
                 doi = normalize_doi(v)
             elif t == "arxiv" and v:
                 arxiv_id = normalize_arxiv_id(v)
+        # An arXiv DataCite DOI is just the arXiv id in disguise.
+        doi_arxiv = arxiv_id_from_doi(doi)
+        if doi_arxiv:
+            arxiv_id = arxiv_id or doi_arxiv
+            doi = None
 
         raw_el = bib.find(".//tei:note[@type='raw_reference']", NS)
         raw = _text(raw_el) or ""
@@ -284,6 +366,22 @@ def _looks_like_figure_noise(text: str) -> bool:
     return len(_MATH_CHAR_RE.findall(text)) >= FIGURE_NOISE_MATH_CHAR_THRESHOLD
 
 
+# Typographic hyphens PDFs use instead of "-": hyphen, non-breaking hyphen,
+# figure dash, en dash, minus sign. "channel‐independent" (U+2010) must
+# match the keyword "channel-independent".
+_HYPHENS = str.maketrans({c: "-" for c in "‐‑‒–−﹣－"})
+# A word broken across lines: "indepen-\ndent" -> "independent".
+_LINE_BREAK_HYPHEN_RE = re.compile(r"(?<=[^\W\d_])-[ \t]*\r?\n[ \t]*(?=[^\W\d_])")
+
+
+def normalize_text(s: str) -> str:
+    """Normalize hyphenation artefacts of PDF text extraction: typographic
+    hyphens become "-", soft hyphens (U+00AD) disappear and words
+    hyphenated across a line break are joined."""
+    s = s.translate(_HYPHENS).replace("­", "")
+    return _LINE_BREAK_HYPHEN_RE.sub("", s)
+
+
 def _walk_body(body) -> tuple[str, list[InlineRef]]:
     """Recursively walk the TEI body, accumulating plain text and recording
     the character offsets of inline bibliographic refs.
@@ -296,6 +394,9 @@ def _walk_body(body) -> tuple[str, list[InlineRef]]:
     pos = [0]  # mutable counter
 
     def emit(s: str) -> None:
+        # Normalized before the offset bookkeeping, so InlineRef offsets
+        # always refer to the final text.
+        s = normalize_text(s)
         if not s:
             return
         parts.append(s)
@@ -383,7 +484,7 @@ def _parse_fallback(pdf_path: Path) -> ParsedPaper:
     import fitz  # pymupdf
 
     doc = fitz.open(pdf_path)
-    full_text = "\n".join(page.get_text() for page in doc)
+    full_text = normalize_text("\n".join(page.get_text() for page in doc))
     doc.close()
 
     # Try to split body / references
