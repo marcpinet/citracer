@@ -62,15 +62,41 @@ class TestBuildPattern:
         assert p.search("transformers") is not None
         assert p.search("transformer-based") is not None
 
-    def test_short_token_not_stemmed(self):
-        # Tokens of length <= KEYWORD_MORPHO_MIN_LEN (4) are taken as-is
-        # (no `\w*` suffix). The negative lookbehind still excludes matches
-        # where the token is preceded by another word char.
+    def test_short_token_word_boundary(self):
+        # Short tokens (<= KEYWORD_MORPHO_MIN_LEN) only take a plural "s",
+        # and every match must end on a word boundary.
         p = build_pattern("foo")
         assert p.search("foo") is not None
+        assert p.search("foos") is not None
         assert p.search("barfoo") is None     # blocked by lookbehind
-        # NB: there is no lookahead guard, so "food" still matches — the
-        # documented trade-off is accepted for short keywords.
+        assert p.search("food") is None       # blocked by lookahead
+
+    def test_no_overstemming(self):
+        # "model" used to become "mod\w*" and match "modern";
+        # "transformer" used to become "transform\w*" and match "transformation".
+        p = build_pattern("model")
+        for ok in ("model", "models", "modelling", "modeling", "modeled"):
+            assert p.search(ok) is not None, ok
+        assert p.search("modern") is None
+        p = build_pattern("transformer")
+        assert p.search("transformation") is None
+
+    def test_acronym_is_case_sensitive(self):
+        p = build_pattern("GAN")
+        assert p.search("We train a GAN.") is not None
+        assert p.search("Two GANs") is not None
+        assert p.search("the ganglion") is None
+        assert build_pattern("RNN").search("RNNG") is None
+
+    def test_acronym_mixed_with_words(self):
+        p = build_pattern("GAN training")
+        assert p.search("GAN Training") is not None
+        assert p.search("gan training") is None
+
+    def test_british_spelling(self):
+        p = build_pattern("normalization")
+        assert p.search("instance normalisation") is not None
+        assert p.search("we normalize inputs") is not None
 
     def test_multi_space_tokens(self):
         # "forecasting" -> stem "forecasti" -> matches any suffix after that
@@ -78,8 +104,9 @@ class TestBuildPattern:
         assert p.search("long-term forecasting") is not None
         assert p.search("long term forecasting") is not None
         assert p.search("long-term forecastings") is not None  # morphological
-        # "forecasted" drops below the "forecasti" stem and does not match.
-        assert p.search("long-term forecasted") is None
+        assert p.search("long-term forecasted") is not None
+        assert p.search("long-term forecasts") is not None
+        assert p.search("long-term forecaster") is None
 
     def test_flexible_hyphen_or_space(self):
         p = build_pattern("self-attention")
@@ -149,6 +176,19 @@ class TestSearchSentenceMode:
         p = _parsed(text, refs)
         hits = search(p, "channel-independent")
         assert hits[0].ref_keys == ["b1", "b2"]
+
+    def test_one_hit_per_sentence(self):
+        # Two occurrences in the same sentence used to yield two identical
+        # passages.
+        text = "Channel-independent models are channel-independent by design. Next."
+        hits = search(_parsed(text), "channel-independent")
+        assert len(hits) == 1
+
+    def test_ref_in_next_paragraph_sentence(self):
+        text = "We use a channel-independent design.\nPrior work b3 did too.\nEnd."
+        refs = [InlineRef(bib_key="b3", start=text.index("b3"), end=text.index("b3") + 2)]
+        hits = search(_parsed(text, refs), "channel-independent")
+        assert hits[0].ref_keys == ["b3"]
 
     def test_ref_keys_deduplicated_within_hit(self):
         text = "channel-independence cites b1 twice b1 and once b2."
@@ -244,21 +284,23 @@ except ImportError:
 class _FakeModel:
     """Stand-in for SentenceTransformer that returns deterministic embeddings.
 
-    Uses a 2D embedding trick: keyword is [1, 0]. A sentence with target
+    Uses a 2D embedding trick: keywords are [1, 0]. A sentence with target
     cosine similarity `s` gets embedding [s, sqrt(1-s^2)], which after
     L2 normalization dot-products to exactly `s` with [1, 0].
     """
 
+    KEYWORDS = {"channel-independent", "test", "patching"}
+
     def __init__(self, similarity_map: dict[str, float] | None = None):
         self._sim_map = similarity_map or {}
+        self.encoded: list[str] = []
 
-    def encode(self, texts: list[str], normalize_embeddings: bool = True):
-        n = len(texts)
-        embs = np.zeros((n, 2), dtype=np.float32)
-        # First text is always the keyword → [1, 0]
-        embs[0] = [1.0, 0.0]
+    def encode(self, texts: list[str], normalize_embeddings: bool = True, **_kw):
+        self.encoded.extend(texts)
+        embs = np.zeros((len(texts), 2), dtype=np.float32)
         for i, t in enumerate(texts):
-            if i == 0:
+            if t in self.KEYWORDS:
+                embs[i] = [1.0, 0.0]
                 continue
             sim = 0.0  # default: orthogonal (similarity = 0)
             for frag, s in self._sim_map.items():
@@ -276,10 +318,34 @@ class TestSemanticSearch:
         from citracer.constants import SEMANTIC_DEFAULT_MODEL
         km_module._semantic_model = _FakeModel(sim_map)
         km_module._semantic_model_name = SEMANTIC_DEFAULT_MODEL
+        km_module._keyword_embeddings.clear()
+        return km_module._semantic_model
 
     def teardown_method(self):
         km_module._semantic_model = None
         km_module._semantic_model_name = None
+        km_module._keyword_embeddings.clear()
+
+    def test_sentences_encoded_once_for_all_keywords(self):
+        from citracer.keyword_matcher import search_all
+        text = "We process each variate independently. Another sentence here."
+        model = self._install_fake_model({"variate independently": 0.8})
+        by_kw = search_all(_parsed(text), ["channel-independent", "patching"],
+                           use_semantic=True, semantic_threshold=0.5)
+        assert len(by_kw["channel-independent"]) == 1
+        assert by_kw["channel-independent"][0].keyword == "channel-independent"
+        assert model.encoded.count("We process each variate independently.") == 1
+
+    def test_embedding_disk_cache(self, tmp_path):
+        from citracer.keyword_matcher import search_all
+        text = "We process each variate independently. Another sentence here."
+        model = self._install_fake_model({"variate independently": 0.8})
+        for _ in range(2):
+            hits = search_all(_parsed(text), ["channel-independent"], use_semantic=True,
+                              semantic_threshold=0.5, cache_dir=tmp_path)
+            assert len(hits["channel-independent"]) == 1
+        # Second run reads the sentence embeddings from disk.
+        assert model.encoded.count("We process each variate independently.") == 1
 
     def test_semantic_disabled_by_default(self):
         """Without use_semantic=True, only regex runs."""
