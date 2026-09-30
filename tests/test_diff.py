@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from citracer.diff import DiffResult, apply_diff, load_baseline, parse_since
+from citracer.diff import (
+    DiffResult,
+    apply_diff,
+    load_baseline,
+    load_baseline_aliases,
+    parse_since,
+)
 from citracer.models import CitationEdge, PaperNode, TracerGraph
 
 
@@ -256,3 +262,29 @@ class TestApplyDiff:
         assert result.n_new_nodes == 2
         assert result.n_new_edges == 2
         assert result.n_skipped_unknown_date == 0
+
+
+class TestAliasAwareDiff:
+    def test_same_paper_under_another_id_is_not_new(self, tmp_path):
+        # Baseline knew the paper by its title hash; this run found its DOI.
+        title = "A time series is worth 64 words"
+        p = tmp_path / "baseline.json"
+        p.write_text(json.dumps({
+            "nodes": [
+                {"id": "title:abc", "title": title, "doi": None},
+                {"id": "arxiv:2211.14730", "title": "Root", "arxiv_id": "2211.14730"},
+            ],
+            "edges": [{"source": "arxiv:2211.14730", "target": "title:abc", "type": "primary"}],
+        }))
+        g = _graph(
+            PaperNode(paper_id="doi:10.1/x", title=title, doi="10.1/x"),
+            PaperNode(paper_id="doi:10.48550/arxiv.2211.14730", title="Root",
+                      arxiv_id="2211.14730"),
+            edges=[CitationEdge(source_id="doi:10.48550/arxiv.2211.14730",
+                                target_id="doi:10.1/x")],
+        )
+        ids, edges = load_baseline(p)
+        result = apply_diff(g, baseline_node_ids=ids, baseline_edge_keys=edges,
+                            baseline_aliases=load_baseline_aliases(p))
+        assert result.n_new_nodes == 0
+        assert result.n_new_edges == 0

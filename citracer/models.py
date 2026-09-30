@@ -2,6 +2,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 
+from .utils import make_paper_id, normalize_arxiv_id, normalize_doi, normalize_title
+
 
 @dataclass
 class BibEntry:
@@ -90,15 +92,109 @@ class CitationEdge:
     is_new: bool = False  # set by --diff, rendering overlay only
 
 
+#: Shortest normalized title allowed to identify a paper on its own. Short
+#: titles ("Deep learning") are shared by distinct works.
+TITLE_ALIAS_MIN_LEN = 15
+
+#: Max year gap between two records merged on title alone.
+TITLE_ALIAS_MAX_YEAR_GAP = 2
+
+
+def identity_keys(
+    paper_id: str | None = None,
+    doi: str | None = None,
+    arxiv_id: str | None = None,
+) -> list[str]:
+    """Every id-style key under which a paper can be known."""
+    keys = []
+    if paper_id:
+        keys.append(paper_id)
+    if doi:
+        keys.append(make_paper_id(doi=doi))
+    if arxiv_id:
+        keys.append(make_paper_id(arxiv_id=arxiv_id))
+    return keys
+
+
 @dataclass
 class TracerGraph:
     nodes: dict[str, PaperNode] = field(default_factory=dict)
     edges: list[CitationEdge] = field(default_factory=list)
     _edge_index: set[tuple[str, str, str]] = field(default_factory=set, repr=False)
+    # Alias index: every known id of a paper (doi:..., arxiv:..., title:...)
+    # -> the node id it was first added under. Lets the tracer recognise a
+    # paper reached once by DOI and once by arXiv id as the same node.
+    _aliases: dict[str, str] = field(default_factory=dict, repr=False)
+    _title_aliases: dict[str, str] = field(default_factory=dict, repr=False)
 
     def add_node(self, node: PaperNode) -> None:
         if node.paper_id not in self.nodes:
             self.nodes[node.paper_id] = node
+            self.register_aliases(node.paper_id, doi=node.doi, arxiv_id=node.arxiv_id,
+                                  title=node.title)
+
+    def register_aliases(
+        self,
+        node_id: str,
+        doi: str | None = None,
+        arxiv_id: str | None = None,
+        title: str | None = None,
+        extra_ids: list[str] | None = None,
+    ) -> None:
+        for key in identity_keys(node_id, doi, arxiv_id) + list(extra_ids or []):
+            self._aliases.setdefault(key, node_id)
+        nt = normalize_title(title)
+        if len(nt) >= TITLE_ALIAS_MIN_LEN:
+            self._title_aliases.setdefault(nt, node_id)
+
+    def find(
+        self,
+        paper_id: str | None = None,
+        doi: str | None = None,
+        arxiv_id: str | None = None,
+        title: str | None = None,
+        year: int | None = None,
+    ) -> str | None:
+        """Return the id of the node that is the same paper, if any.
+
+        Identifiers are tried first. A title match is only accepted when no
+        identifier contradicts it (two different DOIs or two different arXiv
+        ids) and the years, when both known, are close.
+        """
+        for key in identity_keys(paper_id, doi, arxiv_id):
+            node_id = self._aliases.get(key)
+            if node_id is not None and node_id in self.nodes:
+                return node_id
+        nt = normalize_title(title)
+        if len(nt) < TITLE_ALIAS_MIN_LEN:
+            return None
+        node_id = self._title_aliases.get(nt)
+        node = self.nodes.get(node_id) if node_id else None
+        if node is None:
+            return None
+        d, nd = normalize_doi(doi), normalize_doi(node.doi)
+        a, na = normalize_arxiv_id(arxiv_id), normalize_arxiv_id(node.arxiv_id)
+        if (d and nd and d != nd) or (a and na and a != na):
+            return None
+        if year and node.year and abs(year - node.year) > TITLE_ALIAS_MAX_YEAR_GAP:
+            return None
+        return node_id
+
+    def absorb(self, node_id: str, **fields) -> None:
+        """Merge metadata of another record of the same paper into
+        ``node_id``: fill missing fields and register its identifiers."""
+        node = self.nodes[node_id]
+        for name in ("doi", "arxiv_id", "abstract", "citation_count",
+                     "publication_date", "url"):
+            value = fields.get(name)
+            if value is not None and getattr(node, name) is None:
+                setattr(node, name, value)
+        if not node.authors and fields.get("authors"):
+            node.authors = list(fields["authors"])
+        self.register_aliases(node_id, doi=fields.get("doi"),
+                              arxiv_id=fields.get("arxiv_id"),
+                              title=fields.get("title"),
+                              extra_ids=[fields["paper_id"]] if fields.get("paper_id") else None)
 
     def add_edge(self, edge: CitationEdge) -> None:
         if edge.source_id == edge.target_id:

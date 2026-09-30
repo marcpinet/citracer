@@ -13,7 +13,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import TracerGraph
+from .models import TITLE_ALIAS_MIN_LEN, PaperNode, TracerGraph, identity_keys
+from .utils import normalize_title
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,38 @@ class DiffResult:
     n_new_nodes: int
     n_new_edges: int
     n_skipped_unknown_date: int
+
+
+def _node_aliases(paper_id, doi, arxiv_id, title) -> list[str]:
+    """Every key a paper can be recognised by across runs: its id, its DOI
+    and arXiv ids (whatever id form was used), and its normalized title."""
+    keys = identity_keys(paper_id, doi, arxiv_id)
+    nt = normalize_title(title)
+    if len(nt) >= TITLE_ALIAS_MIN_LEN:
+        keys.append(f"normtitle:{nt}")
+    return keys
+
+
+def load_baseline_aliases(path: str | Path) -> dict[str, str]:
+    """Map every alias of every baseline node to its baseline id, so a
+    paper resolved by title hash in one run and by DOI in another is still
+    recognised as the same paper."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    out: dict[str, str] = {}
+    for n in data.get("nodes", []):
+        nid = n.get("id")
+        if nid is None:
+            continue
+        for key in _node_aliases(nid, n.get("doi"), n.get("arxiv_id"), n.get("title")):
+            out.setdefault(key, nid)
+    return out
+
+
+def _baseline_id(node: PaperNode, aliases: dict[str, str]) -> str | None:
+    for key in _node_aliases(node.paper_id, node.doi, node.arxiv_id, node.title):
+        if key in aliases:
+            return aliases[key]
+    return None
 
 
 def load_baseline(path: str | Path) -> tuple[set[str], set[tuple[str, str, str]]]:
@@ -119,6 +152,7 @@ def apply_diff(
     baseline_node_ids: set[str] | None = None,
     baseline_edge_keys: set[tuple[str, str, str]] | None = None,
     since: str | None = None,
+    baseline_aliases: dict[str, str] | None = None,
 ) -> DiffResult:
     """Mark nodes and edges as ``is_new`` based on diff and/or date filter.
 
@@ -130,13 +164,16 @@ def apply_diff(
             ``None`` means no diff baseline.
         since: Date filter string (``YYYY`` or ``YYYY-MM``).
             ``None`` means no date filter.
+        baseline_aliases: Optional alias -> baseline id map (from
+            ``load_baseline_aliases``). When given, nodes are matched to
+            the baseline by DOI / arXiv id / title too, not just by id.
 
     When both ``--diff`` and ``--since`` are provided, a node must satisfy
     **both** conditions (intersection) to be marked new.
 
-    Note: paper_id is not fully stable across runs — if a paper was resolved
-    by title hash in one run and by DOI in another, it may falsely appear as
-    new. Re-running both traces from the same cache minimizes this.
+    Without ``baseline_aliases``, paper_id must match exactly: a paper
+    resolved by title hash in one run and by DOI in another would then
+    falsely appear as new.
     """
     since_year, since_month = parse_since(since) if since else (None, None)
 
@@ -146,12 +183,22 @@ def apply_diff(
     n_new_nodes = 0
     n_skipped = 0
 
+    # Current node id -> the id the same paper had in the baseline.
+    to_baseline: dict[str, str] = {}
+    if has_diff:
+        for node in graph.nodes.values():
+            bid = _baseline_id(node, baseline_aliases) if baseline_aliases else None
+            if bid is None and node.paper_id in baseline_node_ids:
+                bid = node.paper_id
+            if bid is not None:
+                to_baseline[node.paper_id] = bid
+
     for node in graph.nodes.values():
         passes_diff = True
         passes_date = True
 
         if has_diff:
-            passes_diff = node.paper_id not in baseline_node_ids
+            passes_diff = node.paper_id not in to_baseline
 
         if has_since:
             result = _passes_since(
@@ -178,7 +225,11 @@ def apply_diff(
     n_new_edges = 0
     bl_edges = baseline_edge_keys or set()
     for edge in graph.edges:
-        key = (edge.source_id, edge.target_id, edge.edge_type)
+        key = (
+            to_baseline.get(edge.source_id, edge.source_id),
+            to_baseline.get(edge.target_id, edge.target_id),
+            edge.edge_type,
+        )
         if has_diff and key not in bl_edges:
             edge.is_new = True
             n_new_edges += 1
