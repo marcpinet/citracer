@@ -18,7 +18,7 @@
 | `--depth` | `3` | Maximum recursion depth (default `1` in reverse mode) |
 | `--context-window` | sentence-based | If set to an integer, use ±N character window instead of sentence-based ref association |
 | `--consolidate` | off | Ask GROBID to consolidate references against CrossRef (more accurate, ~2-5s extra per PDF) |
-| `--grobid-workers` | `4` | Concurrent GROBID parse requests per BFS level |
+| `--grobid-workers` | `4` | Concurrent GROBID parse requests |
 | `--grobid-url` | `http://localhost:8070` | GROBID service URL |
 | `--s2-api-key` | none | Semantic Scholar API key ([priority order](../installation.md#semantic-scholar-api-key)) |
 | `--reverse` | off | [Reverse trace](reverse.md): walk UP to papers that cite the source |
@@ -38,8 +38,13 @@
 | Flag | Default | Description |
 |---|---|---|
 | `--output` | `./output/graph.html` | Output HTML file path |
-| `--export` | none | Export graph to `.json` or `.graphml`. Repeat for multiple formats |
+| `--export` | none | Export to `.json`, `.graphml`, `.bib` (BibTeX), `.ris` or `.csv`. Repeat for multiple formats |
+| `--export-status` | all | Statuses kept in `.bib` / `.ris` / `.csv` and the Zotero push (`root,analyzed,no_match,unavailable,new`) |
+| `--zotero` | off | Add the papers to a Zotero collection (Web API), passages as child notes, existing papers skipped |
+| `--zotero-collection` | `citracer: <keywords>` | Zotero collection (created if missing). Implies `--zotero` |
+| `--zotero-library` | personal | `groups/<id>` for a group library |
+| `--zotero-api-key` | none | Zotero API key with write access (or `ZOTERO_API_KEY`, or `citracer config set-zotero-key`) |
 | `--details` | off | Show passages directly in node tooltips |
-| `--cache-dir` | `./cache` | Local cache directory for PDFs and metadata |
+| `--cache-dir` | `./cache` | Local cache: PDFs, GROBID outputs, embeddings, API metadata |
 | `--no-open` | off | Do not open the result in a browser |
 | `-v, --verbose` | off | Verbose logging |

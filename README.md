@@ -23,7 +23,7 @@ With `--reverse`, citracer walks the other direction: "which papers cite this pa
 
 ## ⚙️ Installation
 
-Requirements: Python 3.10+ and Docker.
+Requirements: Python 3.10+ and Docker (for GROBID). A reverse trace started from `--arxiv`, `--doi` or a recognised URL runs without GROBID.
 
 ### From PyPI (recommended)
 
@@ -54,7 +54,7 @@ docker run --rm -p 8070:8070 lfoppiano/grobid:0.9.0
 GROBID must be reachable on `http://localhost:8070`. Verify with `curl http://localhost:8070/api/isalive`.
 
 > [!IMPORTANT]
-> A [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key) is optional but recommended. Without one the public endpoint is throttled to ~3.5s between calls. With a key, the throttle drops to ~1.1s. Get a free key at [semanticscholar.org/product/api](https://www.semanticscholar.org/product/api#api-key).
+> A [Semantic Scholar API key](https://www.semanticscholar.org/product/api#api-key) is optional but recommended. Without one the public endpoint is throttled to ~3.5s between calls. With a key, the throttle drops to ~1.1s and Semantic Scholar becomes the first title-search service (before arXiv, which allows one request every 3s). Get a free key at [semanticscholar.org/product/api](https://www.semanticscholar.org/product/api#api-key). If Semantic Scholar rejects the key (HTTP 401/403, e.g. expired), citracer logs a warning.
 
 The key can be provided in three ways, in order of precedence:
 
@@ -89,6 +89,14 @@ citracer config set-email your@email.com
 
 Or pass it via `--email` or the `OPENALEX_EMAIL` environment variable.
 
+A **Zotero API key** is only needed for `--zotero`. Create one with write access at [zotero.org/settings/keys](https://www.zotero.org/settings/keys) and save it once via:
+
+```bash
+citracer config set-zotero-key <your-key>
+```
+
+Or pass it via `--zotero-api-key` or the `ZOTERO_API_KEY` environment variable. `citracer config get-zotero-key` / `clear-zotero-key` show (masked) or remove it.
+
 ## 🚀 Usage
 
 After `pip install citracer` the `citracer` command is on your `PATH`. The examples below use it directly. If you cloned the repo instead, use `python -m citracer` in place of `citracer`.
@@ -110,19 +118,28 @@ citracer --url https://www.biorxiv.org/content/10.1101/2024.01.01.123456v1 --key
 citracer --pdf paper.pdf --keyword "channel-independent" --keyword "patching"
 
 # Reverse trace: find papers that cite the source while mentioning the keyword
-# in their citation context. No PDF downloads, pure S2 metadata. Limit is optional.
+# in their citation context. No PDF downloads and no GROBID needed, pure S2
+# metadata. Limit is optional.
 citracer --arxiv 2211.14730 --keyword "channel-independent" --reverse --reverse-limit 500
 
 # Enrich unavailable nodes with metadata (abstract, citation count) via OpenAlex
 citracer --pdf paper.pdf --keyword "attention" --enrich --email your@email.com
 
-# Supply a local PDF for a node that citracer couldn't download
 # Supply a local PDF or a URL for a node that citracer couldn't download
 citracer --pdf paper.pdf --keyword "attention" --supply-pdf "doi:10.1234/foo=~/papers/foo.pdf"
 citracer --pdf paper.pdf --keyword "attention" --supply-pdf "title:abc123=https://example.com/paper.pdf"
 
 # Export the graph for downstream analysis
 citracer --pdf paper.pdf --keyword "..." --export out/graph.json --export out/graph.graphml
+
+# Export the papers as a bibliography (BibTeX, RIS for Zotero/Mendeley/EndNote, CSV),
+# optionally only those where the keyword was found
+citracer --pdf paper.pdf --keyword "..." --export refs.bib --export refs.ris --export refs.csv
+citracer --pdf paper.pdf --keyword "..." --export refs.bib --export-status root,analyzed
+
+# Add the papers to Zotero (collection created if needed, passages as child notes)
+citracer config set-zotero-key <your-zotero-key>
+citracer --pdf paper.pdf --keyword "attention" --zotero --zotero-collection "Attention survey"
 
 # Diff against a previous trace to highlight new papers (orange nodes)
 citracer --pdf paper.pdf --keyword "attention" --diff output/old_graph.json
@@ -151,34 +168,44 @@ citracer --pdf paper.pdf --keyword "attention" --semantic --semantic-threshold 0
 
 | Flag | Default | Description |
 |---|---|---|
-| `--keyword` | *required* | Term (or concept) to trace through citations. By default, matches morphological variants via regex (e.g. "independent" also matches "independence", "independently"). With `--semantic`, also matches passages that express the same concept in different words. **Repeat** to trace multiple keywords at once |
+| `--keyword` | *required* | Term (or concept) to trace through citations. By default, matches morphological variants via regex (e.g. "independent" also matches "independence", "independently"; "model" matches "modelling" but not "modern"). Matches end on a word boundary, and acronyms (two or more capitals: `GAN`, `LSTM`) are case-sensitive with an optional plural `s`. With `--semantic`, also matches passages that express the same concept in different words. **Repeat** to trace multiple keywords at once |
 | `--match-mode` | `any` | In multi-keyword mode, `any` marks a paper as matched if at least one keyword is found (regex or semantic); `all` requires every keyword to match at least once |
 | `--depth` | `3` | Maximum recursion depth (default `1` in reverse mode) |
 | `--context-window` | sentence-based | If set, fall back to a ±N character window for ref association instead of sentence-based |
 | `--consolidate` | off | Ask GROBID to consolidate each bibliographic reference against CrossRef (more accurate titles/DOIs but ~2-5s extra per PDF) |
-| `--grobid-workers` | `4` | Number of concurrent GROBID parse requests per BFS level |
+| `--grobid-workers` | `4` | Number of concurrent GROBID parse requests |
 | `--grobid-url` | `http://localhost:8070` | GROBID service URL |
 | `--s2-api-key` | none | Semantic Scholar API key (see Installation for priority order) |
-| `--reverse` | off | Reverse trace: instead of walking down the source paper's bibliography, walk UP to papers that cite it. Filters citations by matching the keyword against [Semantic Scholar citation contexts](https://api.semanticscholar.org/api-docs/graph) (the 1-2 sentences around each citation), so no PDFs are downloaded. Default `--depth` remains 1 in this mode |
+| `--reverse` | off | Reverse trace: instead of walking down the source paper's bibliography, walk UP to papers that cite it. Filters citations by matching the keyword against [Semantic Scholar citation contexts](https://api.semanticscholar.org/api-docs/graph) (the 1-2 sentences around each citation), so no PDFs are downloaded. When the source is `--arxiv`, `--doi` or a recognised URL, the root PDF isn't downloaded either and GROBID isn't needed. Default `--depth` remains 1 in this mode |
 | `--reverse-limit` | `500` | Max number of citing papers to fetch per level in reverse mode. Protects against runaway expansion on papers with thousands of citations |
 | `--enrich` | off | Enable metadata enrichment via [OpenAlex](https://openalex.org/) for nodes missing abstract, citation count, or year. Anonymous mode (1 req/s); combine with `--email` for 10x faster lookups |
 | `--email` | none | Email for OpenAlex polite pool (10 req/s). Implies `--enrich`. Can also be set via `OPENALEX_EMAIL` env var or `citracer config set-email` |
-| `--supply-pdf` | none | Supply a PDF for a specific node, as a local path or URL. Format: `ID=PATH` or `ID=URL` where ID is the `paper_id` from a previous graph export (e.g. `doi:10.1234/foo=paper.pdf` or `title:abc123=https://example.com/paper.pdf`). Repeat for multiple papers |
-| `--diff` | none | Compare against a previous citracer JSON export and highlight new nodes (papers not in the baseline) in orange. Useful for monitoring how a citation graph evolves over time |
+| `--supply-pdf` | none | Supply a PDF for a specific node, as a local path or URL. Format: `ID=PATH` or `ID=URL` where ID is the `paper_id` from a previous graph export, or any `doi:`/`arxiv:` identifier of the paper (e.g. `doi:10.1234/foo=paper.pdf` or `title:abc123=https://example.com/paper.pdf`). URLs are streamed to the cache (size-capped). Also honoured with `--no-refetch`. Repeat for multiple papers |
+| `--diff` | none | Compare against a previous citracer JSON export and highlight new nodes (papers not in the baseline) in orange. Papers are matched to the baseline by ID, DOI, arXiv ID or title, so a paper known under another identifier isn't flagged as new. Useful for monitoring how a citation graph evolves over time |
 | `--since` | none | Highlight nodes published on or after this date (`YYYY` or `YYYY-MM`). Works alone (date filter) or with `--diff` (intersection: new AND recent). Uses S2 `publicationDate` for month precision when available, falls back to year |
-| `--no-refetch` | off | Skip network resolution for papers already resolved in a previous run (metadata + PDF cached locally). Dramatically speeds up re-runs and avoids API rate limits |
+| `--no-refetch` | off | Skip network resolution for papers already resolved in a previous run (metadata + PDF cached locally). Dramatically speeds up re-runs and avoids API rate limits. Papers found unavailable are retried after 7 days, and a paper that was unavailable only because a service was down is never cached |
 | `--semantic` | off | Enable semantic matching: after the regex pass, scan remaining sentences with a [sentence-transformer](https://www.sbert.net/) embedding model to catch conceptual matches the regex missed (e.g. "univariate processing" for the keyword "channel-independent"). Requires `pip install citracer[semantic]` |
 | `--semantic-model` | `all-mpnet-base-v2` | Sentence-transformer model name for `--semantic`. Implies `--semantic` |
 | `--semantic-threshold` | `0.40` | Cosine similarity threshold for semantic matching (0.0-1.0). Lower = more recall, higher = more precision. Implies `--semantic` |
+
+### Bibliography and Zotero
+
+| Flag | Default | Description |
+|---|---|---|
+| `--export-status` | all | Only put papers with these statuses in the `.bib` / `.ris` / `.csv` exports and the Zotero push, comma-separated: `root`, `analyzed`, `no_match`, `unavailable`, `new` (e.g. `root,analyzed` for the papers that actually discuss the keyword) |
+| `--zotero` | off | Add the papers to your [Zotero](https://www.zotero.org/) library through the Web API: one item per paper (`preprint` for arXiv-only papers, `journalArticle` otherwise) in a collection, tagged `citracer`, `citracer:<status>` and the keywords, with the keyword passages as a child note. Papers already in the collection (same DOI, arXiv ID or title) are skipped, so re-runs and `--diff` runs only add new papers |
+| `--zotero-collection` | `citracer: <keywords>` | Collection to fill, created if missing. Implies `--zotero` |
+| `--zotero-library` | your personal library | `groups/<id>` to write to a group library (or `users/<id>`) |
+| `--zotero-api-key` | none | Zotero API key with write access ([zotero.org/settings/keys](https://www.zotero.org/settings/keys)). Also read from `ZOTERO_API_KEY` or `citracer config set-zotero-key <key>` |
 
 ### Output
 
 | Flag | Default | Description |
 |---|---|---|
 | `--output` | `./output/graph.html` | Output HTML file |
-| `--export` | none | Export the graph to a file. Format is derived from the extension: `.json` for the citracer JSON format, `.graphml` for the standard GraphML (Gephi, networkx, yEd). Repeat to export multiple formats |
+| `--export` | none | Export to a file. Format is derived from the extension: `.json` (citracer JSON graph), `.graphml` (Gephi, networkx, yEd), `.bib` (BibTeX), `.ris` (imports into Zotero, Mendeley, EndNote) or `.csv` (one row per paper with status, identifiers, citation count, centrality metrics and keyword passages; UTF-8 with BOM for Excel). Repeat to export multiple formats |
 | `--details` | off | Show passages directly in node tooltips |
-| `--cache-dir` | `./cache` | Local cache for PDFs and metadata (SQLite) |
+| `--cache-dir` | `./cache` | Local cache: PDFs (`pdfs/`), GROBID outputs (`tei/`), sentence embeddings for `--semantic` (`embeddings/`) and API metadata (`metadata.sqlite`) |
 | `--no-open` | off | Do not open the result in a browser |
 | `-v, --verbose` | off | Verbose logging |
 
@@ -213,6 +240,7 @@ A control panel in the top-left corner of the graph lets you tune the view on th
 | **curved edges** | checkbox *(on by default)* | Toggle between curved (cubicBezier/curvedCW) and straight edge rendering |
 | **Export PNG** | button + scale selector (2x/3x/4x) | Export the current view as a high-resolution PNG. At 3x on a 1080p display, the output is 5760x3240 |
 | **Export SVG** | button | Export as a vector SVG file (lossless zoom, ideal for LaTeX figures) |
+| **papers: BibTeX / RIS / CSV** | buttons | Export the papers currently visible (legend filters and manually hidden nodes are respected) as BibTeX, RIS (drag the file into Zotero, Mendeley or EndNote) or CSV. Same entries as `--export` |
 | **nodes (legend)** | click rows to toggle | Hide/show nodes by status. When `--diff` or `--since` is used, an orange **new** row appears to toggle new papers |
 | **edges (legend)** | click rows to toggle | Hide/show edges by type (keyword-associated vs. bibliographic link) |
 
@@ -242,7 +270,7 @@ Every trace automatically computes quantitative metrics on the citation graph:
 | **Graph density** | global | Ratio of actual edges to maximum possible edges |
 | **Avg degree** | global | Mean number of connections per node |
 | **Connected components** | global | Number of weakly connected subgraphs |
-| **Keyword density timeline** | global | Per-year breakdown: total papers, papers with keyword, usage density |
+| **Keyword density timeline** | global | Per-year breakdown: total analyzed papers, papers with keyword, usage density (`unavailable` papers are excluded since their text was never read) |
 
 The **analytics** collapsible section in the control panel shows global metrics, a clickable list of pivot papers (clicking focuses the node), and a keyword density timeline table with mini bar charts. Per-node metrics appear in the info panel when hovering or clicking a node.
 
@@ -252,10 +280,10 @@ All analytics are included in the JSON export (`"analytics"` key), the GraphML e
 
 Every trace generates a `manifest.json` alongside the graph output, encoding everything needed to reproduce the exact same graph:
 
-- **citracer version**, **timestamp**, **full CLI command**
+- **citracer version**, **timestamp**, **full CLI command** (the values of `--s2-api-key`, `--zotero-api-key` and `--email` are masked)
 - **Source paper**: type (pdf/doi/arxiv/url), raw input value, resolved title/DOI/arXiv ID
 - **Parameters**: keywords, match mode, depth, context window, consolidate, reverse, enrich, GROBID URL
-- **Environment**: Python version, platform, GROBID availability, API key/email status
+- **Environment**: Python version, platform, GROBID availability (`null` when the run didn't need GROBID), API key/email status
 - **Results**: node/edge counts, status breakdown, analytics summary (global metrics, timeline, pivot papers)
 
 This allows anyone receiving a citracer graph to re-run the trace with identical settings. The manifest is also embedded in JSON exports under the `"metadata"` key.
@@ -266,24 +294,25 @@ This allows anyone receiving a citracer graph to re-run the trace with identical
 
 2. **Inline ref recovery.** GROBID occasionally misses narrative citations like `DLinear Zeng et al. (2023)`, especially when the author name isn't preceded by a parenthesis. A supplementary pass scans the text for canonical author-year patterns (`Surname et al. (Year)`, `Surname & Other (Year)`, `Surname (Year)`) and adds them as inline refs whenever the `(surname, year)` signature matches a unique bibliography entry. In typical ML papers this recovers dozens of refs per document.
 
-3. **Keyword matching (regex + optional semantic).** The keyword is first compiled to a flexible regex that handles morphological variants (e.g. `channel-independent` matches `channel-independence`, `channel independently`, `channelindependence`). The body is segmented into sentences with [pysbd](https://github.com/nipunsadvilkar/pySBD), and each occurrence of the keyword is associated with the references cited in the same sentence or the immediately following one. When `--semantic` is enabled, a second pass scans every sentence the regex *didn't* match using a sentence-transformer embedding model: sentences whose embedding is close enough to the keyword (cosine similarity above the threshold) are added as additional hits. This catches conceptual matches where the idea is expressed with entirely different vocabulary (for example, tracing "channel-independent" also surfaces passages about "decoupled cross-channel correlations" or "per-variate processing"). Regex hits and semantic hits are unioned, so `--semantic` only adds recall without losing any existing matches.
+3. **Keyword matching (regex + optional semantic).** The keyword is first compiled to a flexible regex that handles morphological variants (e.g. `channel-independent` matches `channel-independence`, `channel independently`, `channelindependence`; `model` matches `modelling` but not `modern`; `analysis` matches `analyses`). Typographic hyphens (U+2010 and friends), soft hyphens and words hyphenated across a line break are normalized in the extracted text, so `channel‐independent` and `indepen-`/`dent` still match. Every match must end on a word boundary, and acronyms (`GAN`, `LSTM`) are matched case-sensitively so they don't hit ordinary words. Paragraphs containing a match are segmented into sentences with [pysbd](https://github.com/nipunsadvilkar/pySBD) (lazily: papers without a match are never segmented), and each occurrence of the keyword is associated with the references cited in the same sentence or the immediately following one. When `--semantic` is enabled, a second pass scans every sentence the regex *didn't* match using a sentence-transformer embedding model: sentences whose embedding is close enough to the keyword (cosine similarity above the threshold) are added as additional hits. This catches conceptual matches where the idea is expressed with entirely different vocabulary (for example, tracing "channel-independent" also surfaces passages about "decoupled cross-channel correlations" or "per-variate processing"). Regex hits and semantic hits are unioned, so `--semantic` only adds recall without losing any existing matches.
 
 4. **Reference resolution.** Each cited paper is resolved through the following cascade:
-   1. If GROBID extracted a DOI or arXiv ID, use it directly.
-   2. Otherwise, search arXiv by title (phrase first, then keyword fallback, with rapidfuzz validation). Search results are validated by fuzzy title match (threshold 85) and year cross-check (±3 years from the bibliography entry's year when known) to prevent false matches on similarly-titled papers from different eras.
-   3. If arXiv has nothing, query Semantic Scholar with the same title + year validation, plus 429-aware backoff (also retrieves citation count and open-access PDF URL).
-   4. As a last resort, search OpenReview (covers ICLR/TMLR papers not on arXiv).
-   5. If `--enrich` is set, query OpenAlex for missing metadata (abstract, citation count, OA URL).
+   1. If GROBID extracted an arXiv ID (or an arXiv DOI), use it directly. If it extracted a DOI, look it up by ID on Semantic Scholar; the IDs of all references are fetched with one `POST /paper/batch` request per 500 papers.
+   2. Otherwise, search by title. With an S2 API key, Semantic Scholar's title-match endpoint goes first; without one, arXiv goes first (phrase, then keyword fallback) and S2 is the fallback. Results are validated by fuzzy title match (threshold 85) and year cross-check (±3 years from the bibliography entry's year when known) to prevent false matches on similarly-titled papers from different eras. S2 calls use 429/5xx-aware backoff that honours `Retry-After`.
+   3. As a last resort, search OpenReview (covers ICLR/TMLR papers not on arXiv, which have no DOI).
+   4. If `--enrich` is set, query OpenAlex for missing metadata (abstract, citation count, OA URL).
+
+   Each reference is resolved once per run, however many papers cite it.
 
    PDF download cascade (in order): user-supplied PDF (`--supply-pdf`) > arXiv > OpenReview > Sci-Hub (by DOI, tries multiple mirrors) > S2 open-access URL (covers PMC, publisher OA, bioRxiv, medRxiv, etc.) > preprint-specific download (bioRxiv, medRxiv, ChemRxiv, SSRN, PsyArXiv, AgriXiv, engrXiv).
 
-   All resolved PDFs and metadata are cached in `./cache/`.
+   All resolved PDFs, GROBID outputs (TEI) and metadata are cached in `./cache/`, so re-running a trace (another keyword, a deeper `--depth`, a `--diff`) skips GROBID for every PDF already parsed. A genuine "not found" is cached for 7 days; a failure caused by a timeout, a rate limit or a service outage is never cached. Citation counts are refreshed after 30 days.
 
-5. **Recursion.** The tracer is a BFS that processes papers in queue order. Each level's PDFs are parsed in parallel via a thread pool (`--grobid-workers`, default 4), and the reference resolves inside a single paper are also parallelized. Deduplication uses a canonical ID (DOI > arXiv > OpenReview > title hash). When the same PDF is reached via a second path, the new edge is added without re-parsing. Years from bibliography entries can backfill a node's year when older (e.g. a preprint v1 2022 takes precedence over a publication year 2023), but only within a ±2 year window of the first year we ever saw for that node. This prevents cascading from parser mistakes.
+5. **Recursion.** The tracer is a BFS run as a streaming pipeline: GROBID parsing and keyword matching happen in a thread pool (`--grobid-workers`, default 4); as soon as a paper is parsed its references are resolved in a second pool, and as soon as a reference yields a PDF it is sent to GROBID. The graph itself is still built in strict BFS order, so depths are identical to a level-by-level walk. Deduplication uses a canonical ID (DOI > arXiv > OpenReview > title hash) plus an alias index, so a paper reached once by DOI and once by arXiv ID (or by title) is a single node. When the same PDF is reached via a second path, the new edge is added without re-parsing. Years from bibliography entries can backfill a node's year when older (e.g. a preprint v1 2022 takes precedence over a publication year 2023), but only within a ±2 year window of the first year we ever saw for that node. This prevents cascading from parser mistakes.
 
 6. **Cross-graph bibliographic links.** After the recursive trace is complete, a post-processing pass scans every parsed paper's bibliography against every other node in the graph and adds dashed "bibliographic link" edges for pairs that cite each other but not in the keyword's neighborhood. Matching is exact on DOI/arXiv IDs and fuzzy (rapidfuzz, threshold 88) on titles. No external API calls are needed: everything runs on the already-in-memory graph, so the cost is negligible.
 
-7. **Bibliometric analytics.** After the trace completes, citracer computes per-node centrality metrics (PageRank, betweenness) and graph-wide statistics (density, connected components, keyword density timeline) using [networkx](https://networkx.org/). Pivot papers (the earliest keyword-matched paper in each connected component, plus high-betweenness nodes with the keyword) are automatically flagged. A reproducibility manifest (`manifest.json`) is written alongside the graph, encoding the full trace parameters, environment, and results.
+7. **Bibliometric analytics.** After the trace completes, citracer computes per-node centrality metrics (PageRank, betweenness) and graph-wide statistics (density, connected components, keyword density timeline over the analyzed papers) using [networkx](https://networkx.org/). Pivot papers (the earliest keyword-matched paper in each connected component, plus high-betweenness nodes with the keyword) are automatically flagged. A reproducibility manifest (`manifest.json`) is written alongside the graph, encoding the full trace parameters, environment, and results.
 
 8. **Rendering.** The graph is serialized to an interactive HTML page using [pyvis](https://pyvis.readthedocs.io/), with a custom overlay providing the layout/size/spread controls, the legend filters, the side info panel, keyword highlighting, and KaTeX math.
 
@@ -291,7 +320,7 @@ This allows anyone receiving a citracer graph to re-run the trace with identical
 
 The forward algorithm walks DOWN from a root paper into its bibliography. `--reverse` walks UP: "who cites this paper, and which of them mention the keyword in their citation context?".
 
-The key trick is that Semantic Scholar's `/paper/{id}/citations` endpoint returns a `contexts` field for each citing paper: an array of 1-2 sentence snippets around every place that paper cites the source. We apply the same morphological keyword regex to those snippets locally. A paper whose citation contexts don't contain the keyword is rejected without downloading anything. A paper with a matching context is added to the graph with the snippet as its `keyword_hits`, plus its title/authors/year/arxiv-id from S2 metadata. No GROBID call, no arXiv download. (`--semantic` is not available in reverse mode because the snippets are too short for reliable embedding-based matching.)
+The key trick is that Semantic Scholar's `/paper/{id}/citations` endpoint returns a `contexts` field for each citing paper: an array of 1-2 sentence snippets around every place that paper cites the source. We apply the same morphological keyword regex to those snippets locally. A paper whose citation contexts don't contain the keyword is rejected without downloading anything. A paper with a matching context is added to the graph with the snippet as its `keyword_hits`, plus its title/authors/year/arxiv-id from S2 metadata. No GROBID call, no arXiv download: when the source is given with `--arxiv`, `--doi` or a recognised URL, even the root PDF is skipped and GROBID doesn't need to run. Citation lists are cached. (`--semantic` is not available in reverse mode because the snippets are too short for reliable embedding-based matching.)
 
 For a paper with 2000+ citations, this runs in ~10-30 seconds and typically surfaces 20-100 relevant papers, depending on how specific the keyword is.
 
@@ -304,7 +333,7 @@ Caveats: reverse trace depends entirely on S2 being reachable and having indexed
 
 The default regex handles morphological variants (e.g. `channel-independent` matches `channel-independence`, `channel independently`) but misses papers that express the same concept with different vocabulary: "univariate processing", "per-channel modeling", "decoupled channel correlations".
 
-`--semantic` adds a second pass after the regex: every sentence the regex *didn't* already match is embedded with a [sentence-transformer](https://www.sbert.net/) model (default: `all-mpnet-base-v2`, ~420MB) and compared to the keyword by cosine similarity. Sentences above the threshold (default 0.40) are added as additional hits. The result is a union: all regex matches plus any conceptual matches the embedding caught.
+`--semantic` adds a second pass after the regex: every sentence the regex *didn't* already match is embedded with a [sentence-transformer](https://www.sbert.net/) model (default: `all-mpnet-base-v2`, ~420MB) and compared to the keyword by cosine similarity. Sentences above the threshold (default 0.40) are added as additional hits. The result is a union: all regex matches plus any conceptual matches the embedding caught. Each paper's sentences are encoded once for all keywords (keywords themselves once per run), the encoding runs in the parse workers, and embeddings are cached in `cache/embeddings/` so re-runs don't re-encode anything.
 
 ```bash
 pip install citracer[semantic]
@@ -338,8 +367,8 @@ Month-level precision uses the `publicationDate` field from Semantic Scholar (`Y
 
 Both `is_new` flags (on nodes and edges) are included in JSON and GraphML exports, so downstream scripts can consume the diff without re-running citracer.
 
-> [!WARNING]
-> `paper_id` is not fully stable across runs. If a paper was resolved by title hash in one run and by DOI in another, it may falsely appear as "new". Re-running both traces from the same cache directory minimizes this.
+> [!NOTE]
+> `paper_id` is not always stable across runs (a paper resolved by title hash in one run may get its DOI in the next). `--diff` therefore matches papers against the baseline by ID, DOI, arXiv ID and normalized title, not by ID alone.
 
 ## 📁 Project structure
 
@@ -347,20 +376,23 @@ Both `is_new` flags (on nodes and edges) are included in JSON and GraphML export
 citracer/
 ├── cli.py                  # argparse entry point + GROBID health check + .env loader
 ├── pdf_parser.py           # GROBID + TEI walking + figure-noise filter + paragraph merge + narrative ref supplementation + pymupdf fallback
-├── keyword_matcher.py      # morphological regex + sentence-based ref association (pysbd)
-├── reference_resolver.py   # arXiv-first cascade resolver (arxiv → S2 → OpenReview → Sci-Hub → OA → preprints) with SQLite cache
+├── keyword_matcher.py      # morphological regex + lazy sentence segmentation (pysbd) + semantic pass with embedding cache
+├── reference_resolver.py   # ID-first cascade resolver (S2 batch / arXiv / S2 title match / OpenReview → Sci-Hub → OA → preprints), circuit breakers, per-run memo
 ├── source_resolver.py      # routes --pdf / --doi / --arxiv / --url inputs to a local PDF path
 ├── preprint_resolver.py    # maps DOIs to preprint server PDF URLs (bioRxiv, medRxiv, ChemRxiv, SSRN, PsyArXiv, AgriXiv, engrXiv)
 ├── metadata_enrichment.py  # OpenAlex API client for enriching nodes with abstract, citation count, and OA URLs
-├── metadata_cache.py       # SQLite-backed key/value store for resolver metadata, thread-safe
+├── metadata_cache.py       # SQLite-backed key/value store for resolver metadata, thread-safe, with TTLs
+├── http_client.py          # pooled per-thread HTTP sessions + streamed, atomic, size-capped PDF downloads
 ├── analytics.py            # bibliometric metrics: PageRank, betweenness, pivot detection, timeline
 ├── cross_citation.py       # post-trace pass that adds dashed bibliographic-only edges between graph nodes
 ├── diff.py                 # --diff / --since: compare against a previous trace, mark new nodes/edges
-├── tracer.py               # BFS recursion with parallel parsing, deduplication, year anchoring
+├── tracer.py               # BFS as a streaming pipeline (parse / match / resolve in parallel), deduplication, year anchoring
 ├── visualizer.py           # pyvis rendering pipeline
-├── exporter.py             # GraphML / JSON export (includes analytics and manifest)
+├── exporter.py             # GraphML / JSON export (includes analytics and manifest), dispatches .bib / .ris / .csv
+├── bibliography.py         # BibTeX / RIS / CSV entries (also embedded in the HTML for in-browser export)
+├── zotero.py               # Zotero Web API client: collection, items, keyword-passage notes, dedup
 ├── manifest.py             # reproducibility manifest generation
-├── models.py               # dataclasses
+├── models.py               # dataclasses + graph alias index (same paper under DOI / arXiv / title)
 ├── api_types.py            # TypedDicts for arxiv / Semantic Scholar / OpenReview / OpenAlex payloads
 ├── constants.py            # every tunable threshold and timeout, in one place
 ├── user_config.py          # persistent user-level config (~/.citracer/config.json)
@@ -394,6 +426,7 @@ External APIs:
 - [Semantic Scholar Graph API](https://api.semanticscholar.org/api-docs/graph)
 - [OpenReview API](https://docs.openreview.net/reference/api-v2)
 - [OpenAlex API](https://docs.openalex.org/) (metadata enrichment, opt-in via `--enrich`)
+- [Zotero Web API](https://www.zotero.org/support/dev/web_api/v3/start) (opt-in via `--zotero`)
 - [Sci-Hub](https://sci-hub.in/) (paywall bypass for PDF download)
 - Preprint servers: [bioRxiv](https://www.biorxiv.org/), [medRxiv](https://www.medrxiv.org/), [ChemRxiv](https://chemrxiv.org/), [SSRN](https://www.ssrn.com/), [PsyArXiv](https://psyarxiv.com/), [AgriXiv](https://agrixiv.org/), [engrXiv](https://engrxiv.org/) (PDF download via DOI detection)
 
@@ -402,7 +435,7 @@ External APIs:
 - GROBID misclassifies a small fraction of references, in particular sub-citations with letter suffixes like `Liu et al., 2024b`, which the supplementation pass can't disambiguate. These are silently dropped.
 - The narrative-citation supplementation pass skips ambiguous `(surname, year)` signatures (e.g. two different Zhou 2022 papers in the bibliography). These missed cases are rare but do happen in survey-heavy papers.
 - pysbd handles most academic abbreviations but can occasionally split mid-sentence; falling back to `--context-window 300` is sometimes useful.
-- arXiv enforces ~3 seconds between requests, so the first run on a deep trace can take several minutes. The local cache makes subsequent runs fast.
+- arXiv enforces ~3 seconds between requests, so without a Semantic Scholar key the first run on a deep trace can take several minutes. The local cache (metadata, PDFs and GROBID outputs) makes subsequent runs fast.
 - Papers that cannot be resolved through any source in the download cascade (arXiv, OpenReview, Sci-Hub, S2 open-access, preprint servers) appear as `unavailable` red nodes. Books and some workshop proceedings are typically not retrievable. Use `--supply-pdf` to provide PDFs manually (local path or URL) for these nodes.
 - The "Fruchterman-Reingold" layout option is implemented via vis.js's `forceAtlas2Based` solver, which is the closest approximation available natively. A proper Kamada-Kawai implementation isn't offered because vis.js doesn't ship one.
 - `--semantic` matching depends on the quality of the sentence-transformer model. The default `all-mpnet-base-v2` was benchmarked at F1=0.93 on academic citation text (vs 0.86 for `all-MiniLM-L6-v2`). Domain-specific keywords may benefit from threshold tuning. Semantic matching is not available in reverse trace mode.
@@ -417,7 +450,7 @@ pytest tests/ -v
 The test suite is hermetic, with no GROBID and no network. GROBID output is
 exercised via a pre-baked TEI fixture in `tests/fixtures/sample.tei.xml`,
 and every external API (arXiv, Semantic Scholar, OpenReview, PDF downloads)
-is mocked. Runs in under 2 seconds.
+is mocked. Runs in a few seconds.
 
 CI runs the suite on Python 3.10 / 3.11 / 3.12 via GitHub Actions on every
 push to `main`, every pull request, and on manual dispatch from the Actions

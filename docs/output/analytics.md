@@ -29,6 +29,8 @@ A per-year breakdown of keyword usage across the graph:
 - **with_keyword**: papers where the keyword was found
 - **keyword_density**: ratio of the two
 
+Only papers whose text was analyzed count: `unavailable` nodes are excluded, since their text was never read.
+
 The timeline is displayed as a table with mini bar charts in the analytics section of the control panel.
 
 ## Pivot detection

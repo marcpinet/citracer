@@ -32,6 +32,7 @@ The top-left panel provides:
 | **Curved edges** | Toggle between curved and straight edge rendering |
 | **Export PNG** | Export the current view as a high-resolution raster image (2x, 3x, or 4x scale) |
 | **Export SVG** | Export as a vector file (lossless zoom, ideal for LaTeX figures and posters) |
+| **papers: BibTeX / RIS / CSV** | Export the visible papers as a bibliography or spreadsheet (see [Export formats](export.md)) |
 | **Nodes legend** | Click to show/hide nodes by status |
 | **Edges legend** | Click to show/hide keyword-associated or bibliographic edges |
 

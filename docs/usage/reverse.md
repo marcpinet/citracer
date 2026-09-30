@@ -40,3 +40,5 @@ Reverse traces produce a **star topology** (many nodes pointing to one root), so
 - Papers S2 doesn't know about won't appear
 - No cross-graph bibliographic links (bibliographies are not parsed)
 - `--semantic` is not available in reverse mode (snippets are too short for embedding-based matching)
+- With `--arxiv`, `--doi` or a recognised URL, the root's metadata comes from Semantic Scholar: no PDF download and no GROBID needed. Citation lists are cached for 30 days.
+- Citing papers for which Semantic Scholar has no citation context can't be filtered and are skipped; their number is logged.

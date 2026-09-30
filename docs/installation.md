@@ -75,6 +75,9 @@ Or pass via `--email` or the `OPENALEX_EMAIL` environment variable.
 | `citracer config set-email <email>` | Save OpenAlex email |
 | `citracer config get-email` | Print saved email |
 | `citracer config clear-email` | Remove saved email |
+| `citracer config set-zotero-key <key>` | Save Zotero API key (for `--zotero`) |
+| `citracer config get-zotero-key` | Print saved Zotero key (masked) |
+| `citracer config clear-zotero-key` | Remove saved Zotero key |
 | `citracer config path` | Print config file path |
 
 The config file is created with mode `600` on POSIX systems.
