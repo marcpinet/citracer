@@ -2,7 +2,6 @@
 and anchored year backfill."""
 from citracer.cross_citation import (
     _better_year,
-    _find_matching_bib,
     add_secondary_edges,
 )
 from citracer.models import BibEntry, CitationEdge, PaperNode, TracerGraph
@@ -28,26 +27,40 @@ def _node(
 
 
 # ---------------------------------------------------------------------------
-# _find_matching_bib
+# Bibliography -> node matching (through add_secondary_edges)
 # ---------------------------------------------------------------------------
 
-class TestFindMatchingBib:
+def _links(bib: dict[str, BibEntry], target: PaperNode) -> bool:
+    """True iff a source citing ``bib`` gets a secondary edge to ``target``."""
+    g = TracerGraph()
+    g.add_node(_node("src", title="Source paper about something else", bibliography=bib))
+    g.add_node(target)
+    add_secondary_edges(g)
+    return g.has_edge("src", target.paper_id, "secondary")
+
+
+class TestBibMatching:
     def test_match_by_arxiv_id(self):
         bib = {
             "b0": BibEntry(key="b0", title="Wrong title", arxiv_id="2211.14730"),
         }
         target = _node("x", title="A time series is worth 64 words", arxiv_id="2211.14730")
-        assert _find_matching_bib(bib, target) is not None
+        assert _links(bib, target)
+
+    def test_match_by_arxiv_doi(self):
+        bib = {"b0": BibEntry(key="b0", title="Wrong title", doi="10.48550/arXiv.2211.14730")}
+        target = _node("x", title="A time series is worth 64 words", arxiv_id="2211.14730")
+        assert _links(bib, target)
 
     def test_match_by_doi(self):
         bib = {"b0": BibEntry(key="b0", title="Wrong title", doi="10.1/abc")}
         target = _node("x", title="...", doi="10.1/abc")
-        assert _find_matching_bib(bib, target) is not None
+        assert _links(bib, target)
 
     def test_doi_normalized_before_comparison(self):
         bib = {"b0": BibEntry(key="b0", doi="https://doi.org/10.1/ABC")}
         target = _node("x", doi="10.1/abc")
-        assert _find_matching_bib(bib, target) is not None
+        assert _links(bib, target)
 
     def test_fuzzy_title_match(self):
         bib = {
@@ -60,18 +73,18 @@ class TestFindMatchingBib:
             "x",
             title="A time series is worth 64 words: Long-term forecasting with transformers",
         )
-        assert _find_matching_bib(bib, target) is not None
+        assert _links(bib, target)
 
     def test_no_match(self):
         bib = {"b0": BibEntry(key="b0", title="Completely unrelated paper on cryptography")}
         target = _node("x", title="Channel independent time series forecasting")
-        assert _find_matching_bib(bib, target) is None
+        assert not _links(bib, target)
 
     def test_short_title_rejected(self):
         # Too short to fuzzy-match reliably
         bib = {"b0": BibEntry(key="b0", title="ABC")}
         target = _node("x", title="ABC")
-        assert _find_matching_bib(bib, target) is None
+        assert not _links(bib, target)
 
 
 # ---------------------------------------------------------------------------

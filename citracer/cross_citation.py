@@ -5,18 +5,19 @@ this module walks every parsed paper's bibliography against every other
 node in the graph and emits dashed "bibliographic link" edges for pairs
 that cite each other outside the keyword's neighbourhood.
 
-The pass is purely in-memory — no API calls — so the runtime cost is
-O(n² × |bib|) with tight constants, which is dwarfed by the trace itself.
+The pass is purely in-memory — no API calls. Exact DOI / arXiv matches
+use the graph's alias index; fuzzy title matching is done by rapidfuzz's
+C-level ``process.extract`` with a score cutoff, so only the handful of
+candidates above the threshold ever reach Python code.
 """
 from __future__ import annotations
 import logging
-from datetime import date
 
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 
 from .constants import CROSS_CITATION_FUZZY_THRESHOLD, CROSS_CITATION_MIN_TITLE_LEN, YEAR_GAP_THRESHOLD
 from .models import BibEntry, CitationEdge, PaperNode, TracerGraph
-from .utils import normalize_arxiv_id, normalize_doi, normalize_title
+from .utils import arxiv_id_from_doi, normalize_title, plausible_year
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def _better_year(anchor: int | None, current: int | None, candidate: int | None)
     """
     if candidate is None:
         return current
-    if not (1970 <= candidate <= date.today().year + 1):
+    if not plausible_year(candidate):
         return current  # garbage
     if anchor is None:
         # No anchor: just be permissive for the very first assignment.
@@ -55,27 +56,18 @@ def add_secondary_edges(graph: TracerGraph) -> int:
 
     Matches are scoped to the graph we already built — no external API calls.
     """
-    # Pre-index nodes by DOI and arXiv ID for O(1) exact matching.
-    doi_to_id: dict[str, str] = {}
-    arxiv_to_id: dict[str, str] = {}
-    for node in graph.nodes.values():
-        d = normalize_doi(node.doi)
-        if d:
-            doi_to_id[d] = node.paper_id
-        a = normalize_arxiv_id(node.arxiv_id)
-        if a:
-            arxiv_to_id[a] = node.paper_id
-
     # Pre-normalize target titles for fuzzy matching (once, not per source).
-    node_norm_titles: dict[str, str] = {}
+    target_ids: list[str] = []
+    target_titles: list[str] = []
     for node in graph.nodes.values():
         if node.title:
             nt = normalize_title(node.title)
             if nt and len(nt) >= CROSS_CITATION_MIN_TITLE_LEN:
-                node_norm_titles[node.paper_id] = nt
+                target_ids.append(node.paper_id)
+                target_titles.append(nt)
 
     added = 0
-    for source in graph.nodes.values():
+    for source in list(graph.nodes.values()):
         if not source.bibliography:
             continue
 
@@ -94,17 +86,14 @@ def add_secondary_edges(graph: TracerGraph) -> int:
             ))
             added += 1
 
-        # Phase 1: exact ID matches via pre-built index — O(B) per source.
+        # Phase 1: exact ID matches via the graph's alias index — O(B).
         exact_targets: set[str] = set()
         for bib in source.bibliography.values():
-            target_id = None
-            bd = normalize_doi(bib.doi)
-            if bd and bd in doi_to_id:
-                target_id = doi_to_id[bd]
-            if target_id is None:
-                ba = normalize_arxiv_id(bib.arxiv_id)
-                if ba and ba in arxiv_to_id:
-                    target_id = arxiv_to_id[ba]
+            if not (bib.doi or bib.arxiv_id):
+                continue
+            target_id = graph.find(
+                doi=bib.doi, arxiv_id=bib.arxiv_id or arxiv_id_from_doi(bib.doi),
+            )
             if target_id is None or target_id == source.paper_id:
                 continue
             exact_targets.add(target_id)
@@ -113,71 +102,38 @@ def add_secondary_edges(graph: TracerGraph) -> int:
             _add(graph.nodes[target_id], bib)
 
         # Phase 2: fuzzy title matching for targets not found via exact IDs.
-        # Pre-normalize bib titles once for this source.
-        bib_titles: list[tuple[BibEntry, str]] = []
+        bibs: list[BibEntry] = []
+        bib_titles: list[str] = []
         for bib in source.bibliography.values():
             raw = bib.title or bib.raw
-            if raw:
-                bib_titles.append((bib, normalize_title(raw)))
-
+            nt = normalize_title(raw) if raw else ""
+            if nt:
+                bibs.append(bib)
+                bib_titles.append(nt)
         if not bib_titles:
             continue
 
-        for target_id, target_title in node_norm_titles.items():
-            if target_id == source.paper_id:
-                continue
-            if target_id in exact_targets:
+        for target_id, target_title in zip(target_ids, target_titles):
+            if target_id == source.paper_id or target_id in exact_targets:
                 continue
             if graph.has_edge(source.paper_id, target_id, "primary"):
                 continue
+            # token_sort_ratio >= cutoff is necessary for min(set, sort) >=
+            # cutoff, so let rapidfuzz prune in C, then score the survivors.
+            candidates = process.extract(
+                target_title, bib_titles,
+                scorer=fuzz.token_sort_ratio,
+                score_cutoff=CROSS_CITATION_FUZZY_THRESHOLD,
+                limit=None,
+            )
             best_bib: BibEntry | None = None
             best_score = 0.0
-            for bib, bib_title in bib_titles:
-                score = min(
-                    fuzz.token_set_ratio(target_title, bib_title),
-                    fuzz.token_sort_ratio(target_title, bib_title),
-                )
+            for _choice, sort_score, idx in candidates:
+                score = min(sort_score, fuzz.token_set_ratio(target_title, bib_titles[idx]))
                 if score > best_score:
                     best_score = score
-                    best_bib = bib
+                    best_bib = bibs[idx]
             if best_score >= CROSS_CITATION_FUZZY_THRESHOLD and best_bib:
                 _add(graph.nodes[target_id], best_bib)
 
     return added
-
-
-def _find_matching_bib(
-    bib_dict: dict[str, BibEntry],
-    node: PaperNode,
-) -> BibEntry | None:
-    """Return the BibEntry from `bib_dict` that best matches `node`, or None."""
-    # First pass: exact id matches (fast & reliable)
-    node_doi = normalize_doi(node.doi)
-    node_arxiv = normalize_arxiv_id(node.arxiv_id)
-    for bib in bib_dict.values():
-        if node_doi and normalize_doi(bib.doi) == node_doi:
-            return bib
-        if node_arxiv and normalize_arxiv_id(bib.arxiv_id) == node_arxiv:
-            return bib
-
-    # Second pass: fuzzy title match
-    if not node.title:
-        return None
-    target = normalize_title(node.title)
-    if not target or len(target) < CROSS_CITATION_MIN_TITLE_LEN:
-        return None
-    best: BibEntry | None = None
-    best_score = 0.0
-    for bib in bib_dict.values():
-        raw = bib.title or bib.raw
-        if not raw:
-            continue
-        candidate = normalize_title(raw)
-        score = min(
-            fuzz.token_set_ratio(target, candidate),
-            fuzz.token_sort_ratio(target, candidate),
-        )
-        if score > best_score:
-            best_score = score
-            best = bib
-    return best if best_score >= CROSS_CITATION_FUZZY_THRESHOLD else None

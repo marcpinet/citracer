@@ -34,7 +34,7 @@ class _FakeParser:
         self.by_path = by_path
         self.calls: list[str] = []
 
-    def parse(self, pdf_path, grobid_url=None, consolidate_citations=False):
+    def parse(self, pdf_path, **_kwargs):
         self.calls.append(str(pdf_path))
         key = str(pdf_path)
         if key in self.by_path:
@@ -560,3 +560,99 @@ class TestReverseTrace:
                 keyword=[],
                 cache_dir=tmp_path,
             )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline: dedup across identifiers, passages, years, parallelism
+# ---------------------------------------------------------------------------
+
+class TestPipelineDedup:
+    def test_same_paper_under_doi_and_arxiv_is_one_node(self, monkeypatched_tracer, tmp_path):
+        child_pdf = tmp_path / "c.pdf"
+        child_pdf.write_bytes(b"%PDF")
+        root = _parsed(
+            "Root",
+            "channel-independent work b0 and channel-independent follow-up b1.",
+            {"b0": BibEntry(key="b0", title="Child"),
+             "b1": BibEntry(key="b1", title="Child (journal version)")},
+        )
+        child = _parsed("Child", "channel-independent.", {})
+        parser = _FakeParser({"root.pdf": root, str(child_pdf): child})
+        resolver = _FakeResolver({
+            "b0": ResolvedRef(paper_id="arxiv:2211.14730", title="Child",
+                              arxiv_id="2211.14730", pdf_path=child_pdf),
+            "b1": ResolvedRef(paper_id="doi:10.1/child", title="Child",
+                              doi="10.1/child", arxiv_id="2211.14730"),
+        })
+        graph = monkeypatched_tracer(parser, resolver, root="root.pdf", depth=1)
+        assert len(graph.nodes) == 2
+        child_id = graph.find(arxiv_id="2211.14730")
+        assert graph.find(doi="10.1/child") == child_id
+        # b1 had no PDF (leaf), b0 brought the PDF: the leaf is upgraded,
+        # not left as an unavailable dead end.
+        assert graph.nodes[child_id].status == "analyzed"
+        root_id = next(n for n, v in graph.nodes.items() if v.status == "root")
+        assert graph.has_edge(root_id, child_id)
+
+    def test_passage_matching_two_keywords_listed_once(self, monkeypatched_tracer):
+        root = _parsed("Root", "Channel-independent patching is used here. Next.", {})
+        graph = monkeypatched_tracer(
+            _FakeParser({"root.pdf": root}), _FakeResolver({}), root="root.pdf",
+            keyword=["channel-independent", "patching"],
+        )
+        (node,) = graph.nodes.values()
+        assert len(node.keyword_hits) == 1
+
+    def test_year_backfill_not_reset_by_later_parent(self, monkeypatched_tracer, tmp_path):
+        child_pdf = tmp_path / "c.pdf"
+        child_pdf.write_bytes(b"%PDF")
+        root = _parsed(
+            "Root", "channel-independent b0. Also channel-independent b1.",
+            {"b0": BibEntry(key="b0", title="PatchTST", year=2022),
+             "b1": BibEntry(key="b1", title="PatchTST", year=2023)},
+        )
+        child = _parsed("PatchTST", "channel-independent.", {}, year=2023)
+        parser = _FakeParser({"root.pdf": root, str(child_pdf): child})
+        ref = ResolvedRef(paper_id="arxiv:P", title="PatchTST", year=2023,
+                          arxiv_id="P", pdf_path=child_pdf)
+        resolver = _FakeResolver({"b0": ref, "b1": ref})
+        graph = monkeypatched_tracer(parser, resolver, root="root.pdf", depth=1)
+        assert graph.nodes["arxiv:P"].year == 2022
+
+    def test_old_years_are_kept(self, monkeypatched_tracer, tmp_path):
+        root = _parsed("Root", "channel-independent b0.",
+                       {"b0": BibEntry(key="b0", title="A mathematical theory", year=1948)})
+        resolver = _FakeResolver({
+            "b0": ResolvedRef(paper_id="title:shannon", title="A mathematical theory",
+                              year=1948),
+        })
+        graph = monkeypatched_tracer(_FakeParser({"root.pdf": root}), resolver,
+                                     root="root.pdf", depth=1)
+        assert graph.nodes["title:shannon"].year == 1948
+
+    def test_parallel_workers_give_same_graph(self, monkeypatch, tmp_path):
+        pdfs = {}
+        by_path = {}
+        bibs = {}
+        refs = {}
+        for i in range(6):
+            p = tmp_path / f"p{i}.pdf"
+            p.write_bytes(b"%PDF")
+            pdfs[i] = p
+            by_path[str(p)] = _parsed(f"P{i}", f"channel-independent leaf {i}.", {})
+            bibs[f"b{i}"] = BibEntry(key=f"b{i}", title=f"P{i}")
+            refs[f"b{i}"] = ResolvedRef(paper_id=f"arxiv:{i}", title=f"P{i}",
+                                        arxiv_id=str(i), pdf_path=p)
+        text = " ".join(f"channel-independent b{i}." for i in range(6))
+        by_path["root.pdf"] = _parsed("Root", text, bibs)
+
+        def run(workers):
+            monkeypatch.setattr(tracer_mod.pdf_parser, "parse", _FakeParser(by_path).parse)
+            monkeypatch.setattr(tracer_mod, "ReferenceResolver",
+                                lambda **_kw: _FakeResolver(refs))
+            g = tracer_mod.trace(root_pdf=Path("root.pdf"), keyword="channel-independent",
+                                 max_depth=2, cache_dir=tmp_path / "cache",
+                                 grobid_workers=workers)
+            return list(g.nodes), [(e.source_id, e.target_id, e.edge_type) for e in g.edges]
+
+        assert run(1) == run(4)
