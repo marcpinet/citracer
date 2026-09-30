@@ -23,6 +23,11 @@ GROBID_TIMEOUT_SECONDS: float = 300.0
 #: image has 10 workers by default, so 4-8 is a safe sweet spot.
 GROBID_DEFAULT_WORKERS: int = 4
 
+#: Backoff delays (seconds) when GROBID answers 503. GROBID returns 503 when
+#: all of its worker threads are busy and expects the client to retry; we
+#: must not fall back to the (much worse) pymupdf parser in that case.
+GROBID_503_BACKOFF_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 16.0)
+
 
 # ---------------------------------------------------------------------------
 # Keyword matcher (keyword_matcher.py)
@@ -129,6 +134,31 @@ ARXIV_KEYWORD_SEARCH_MIN_WORD_LEN: int = 4
 #: Set to 3 to allow preprint-to-publication gaps (typically 0-2 years)
 #: with a small margin. Only applied when both years are known.
 SEARCH_YEAR_TOLERANCE: int = 3
+
+#: Consecutive Sci-Hub transport failures (timeouts, connection errors on
+#: every mirror) after which Sci-Hub is skipped for the cooldown below.
+SCIHUB_CIRCUIT_BREAKER_THRESHOLD: int = 2
+
+#: Sci-Hub circuit breaker cooldown, in seconds.
+SCIHUB_CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = 300.0
+
+#: Largest PDF we accept to download, in bytes. Protects memory and disk
+#: against a URL that streams something huge.
+PDF_MAX_BYTES: int = 100 * 1024 * 1024
+
+#: Maximum number of ids per Semantic Scholar ``POST /paper/batch`` call.
+S2_BATCH_SIZE: int = 500
+
+#: Page size for ``/paper/{id}/citations`` (the API maximum).
+S2_CITATIONS_PAGE_SIZE: int = 1000
+
+#: How long a genuine "not found" answer (the service replied, nothing
+#: matched) stays cached. Transient failures are never cached.
+NEGATIVE_CACHE_TTL_SECONDS: float = 7 * 24 * 3600
+
+#: How long metadata that goes stale (citation counts, citing papers)
+#: stays cached before being refetched.
+METADATA_CACHE_TTL_SECONDS: float = 30 * 24 * 3600
 
 #: Sci-Hub mirror URLs, tried in order. The first one that responds wins.
 SCIHUB_MIRRORS: tuple[str, ...] = (
