@@ -4,7 +4,7 @@
 
 - **Ambiguous narrative citations**: The supplementation pass skips ambiguous `(surname, year)` signatures (e.g. two different Zhou 2022 papers in the bibliography). Rare but possible in survey papers.
 
-- **Sentence splitting**: pysbd handles most academic abbreviations but can occasionally split mid-sentence. Falling back to `--context-window 300` sometimes helps.
+- **Sentence splitting**: yasbd handles most academic abbreviations well but can still split mid-sentence on unknown ones. Falling back to `--context-window 300` sometimes helps.
 
 - **arXiv rate limits**: arXiv enforces ~3 seconds between requests. The first run on a deep trace can take several minutes. Subsequent runs are fast thanks to the local cache.
 
