@@ -5,6 +5,6 @@ arxiv>=2.1.0
 pyvis>=0.3.2
 rapidfuzz>=3.6.0
 tqdm>=4.66.0
-pysbd>=0.3.4
+yasbd-lib>=1.0.2
 python-dotenv>=1.0.0
 networkx>=3.0
