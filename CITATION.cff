@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use citracer in your research, please cite it using the metadata below."
+type: software
+title: "citracer"
+abstract: >-
+  citracer traces citation chains for any keyword across research papers.
+  Given a PDF and a keyword, it finds every sentence where the keyword appears,
+  identifies the references cited nearby, downloads those papers and repeats
+  the process recursively, producing an interactive citation graph. A reverse
+  mode walks forward through the papers that cite the source while mentioning
+  the keyword.
+authors:
+  - family-names: "Pinet"
+    given-names: "Marc"
+version: "1.8.1"
+date-released: "2026-09-30"
+license: MIT
+url: "https://github.com/marcpinet/citracer"
+repository-code: "https://github.com/marcpinet/citracer"
+keywords:
+  - citation-graph
+  - literature-review
+  - grobid
+  - arxiv
+  - semantic-scholar
+  - openreview
+  - pdf-parsing
+  - research-tools
+  - bibliography
