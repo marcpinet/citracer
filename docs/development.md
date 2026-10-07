@@ -56,7 +56,7 @@ citracer/
 | [lxml](https://lxml.de/) | TEI XML processing |
 | [pymupdf](https://pymupdf.readthedocs.io/) | PDF text extraction (fallback) |
 | [arxiv](https://github.com/lukasschwab/arxiv.py) | arXiv search and download |
-| [pysbd](https://github.com/nipunsadvilkar/pySBD) | Sentence boundary detection |
+| [yasbd-lib](https://github.com/speedyk-005/yasbd-lib) | Sentence boundary detection |
 | [pyvis](https://pyvis.readthedocs.io/) | Interactive HTML graph rendering |
 | [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) | Fuzzy title matching |
 | [networkx](https://networkx.org/) | Graph analytics |

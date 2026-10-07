@@ -17,7 +17,7 @@ GROBID misses some narrative citations like `"DLinear Zeng et al. (2023)"`. A su
 
 ## 3. Keyword matching
 
-The keyword is compiled to a morphological regex (e.g. `channel-independent` matches `channel-independence`, `channelindependently`; `model` matches `modelling` but not `modern`). Matches must end on a word boundary and acronyms (`GAN`, `LSTM`) are case-sensitive. Paragraphs containing a match are segmented into sentences with [pysbd](https://github.com/nipunsadvilkar/pySBD), and each match is associated with references in the same sentence or the next. A sentence contributes one passage, however many times the keyword appears in it.
+The keyword is compiled to a morphological regex (e.g. `channel-independent` matches `channel-independence`, `channelindependently`; `model` matches `modelling` but not `modern`). Matches must end on a word boundary and acronyms (`GAN`, `LSTM`) are case-sensitive. Paragraphs containing a match are segmented into sentences with [yasbd-lib](https://github.com/speedyk-005/yasbd-lib), and each match is associated with references in the same sentence or the next. A sentence contributes one passage, however many times the keyword appears in it.
 
 With `--semantic`, a second pass embeds remaining sentences with a sentence-transformer and compares them to the keyword by cosine similarity, catching conceptual matches the regex missed. See [Semantic matching](usage/semantic.md).
 

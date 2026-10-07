@@ -2,12 +2,12 @@
 
 Two modes for associating refs to a keyword hit:
   - sentence mode (default): refs in the SAME sentence as the keyword OR
-    in the NEXT sentence. Uses pysbd for boundary detection. Precise.
+    in the NEXT sentence. Uses yasbd for boundary detection. Precise.
   - char-window mode (legacy / fallback): refs within ±N characters of the
     keyword. More permissive, used as a fallback when sentence detection
     misbehaves.
 
-Sentence segmentation (pysbd, pure Python and slow) is done lazily, one
+Sentence segmentation (yasbd, pure Python) is done lazily, one
 paragraph at a time, and only for paragraphs that actually contain a hit —
 papers without a match never get segmented at all.
 
@@ -25,7 +25,7 @@ import threading
 from bisect import bisect_right
 from pathlib import Path
 
-import pysbd
+from yasbd.utils.pysbd_adapter import Segmenter
 
 from .constants import (
     KEYWORD_MORPHO_MIN_LEN,
@@ -36,25 +36,25 @@ from .models import KeywordHit, ParsedPaper
 
 logger = logging.getLogger(__name__)
 
-_segmenter: pysbd.Segmenter | None = None
+_segmenter: Segmenter | None = None
 _segmenter_lock = threading.Lock()
 
 
-def _get_segmenter() -> pysbd.Segmenter:
+def _get_segmenter() -> Segmenter:
     global _segmenter
     with _segmenter_lock:
         if _segmenter is None:
-            _segmenter = pysbd.Segmenter(language="en", clean=False, char_span=True)
+            _segmenter = Segmenter(language="en", clean=False, char_span=True)
         return _segmenter
 
 
 def _segment(text: str) -> list[tuple[int, int]]:
     """Sentence spans of ``text`` (offsets relative to ``text``), sorted and
-    de-duplicated (pysbd's char_span mode can emit the same span twice)."""
+    de-duplicated (char_span mode can emit the same span twice)."""
     try:
         out = _get_segmenter().segment(text)
     except Exception as e:
-        logger.warning("pysbd failed (%s); falling back to single span", e)
+        logger.warning("yasbd failed (%s); falling back to single span", e)
         return [(0, len(text))]
     spans = sorted({(s.start, s.end) for s in out if s.end > s.start})
     deduped: list[tuple[int, int]] = []
