@@ -2,6 +2,8 @@
 
 # citracer
 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/citracer?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLUE&right_color=ORANGE&left_text=downloads)](https://pepy.tech/projects/citracer)
+
 https://github.com/user-attachments/assets/36855b62-a9ab-4404-90c3-9ac7f418899c
 
 ## 📝 Description
